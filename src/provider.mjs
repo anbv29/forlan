@@ -37,7 +37,7 @@ export async function completion(config, messages, signal) {
   const response = await fetch(config.baseUrl + '/chat/completions', {
     method: 'POST', headers, redirect: 'error',
     signal: AbortSignal.any([signal, AbortSignal.timeout(90000)]),
-    body: JSON.stringify({ model: config.model, messages, tools: modelTools,
+    body: JSON.stringify({ model: config.model, messages, tools: config.readOnly ? modelTools.filter(t => ['list_files', 'read_file'].includes(t.function.name)) : modelTools,
       tool_choice: 'auto', max_tokens: 4096 })
   });
   const body = await responseJson(response);
@@ -53,6 +53,7 @@ export async function completion(config, messages, signal) {
 async function executeTool(call, config, workspace, signal) {
   if (call.type !== 'function' || typeof call.id !== 'string') throw new Error('Invalid provider tool call.');
   const name = call.function?.name;
+  if (config.readOnly && ['write_file', 'run_checks'].includes(name)) throw new Error('This agent stage is read-only.');
   const args = JSON.parse(call.function?.arguments ?? '{}');
   if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Expected tool argument object.');
   const definition = modelTools.find(t => t.function.name === name)?.function;

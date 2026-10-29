@@ -370,3 +370,87 @@ test('MCP checkpoint review requires a user elicitation response', async () => {
     await f.remove();
   }
 });
+
+test('read-only BYOK stage rejects writes even if a provider requests them', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res, body) => {
+    calls++;
+    assert.deepEqual(body.tools.map(t => t.function.name), ['list_files', 'read_file']);
+    if (calls === 1) reply(res, { tool_calls: [{
+      id: 'forbidden', type: 'function',
+      function: { name: 'write_file', arguments: '{"path":"answer.txt","content":"forbidden"}' }
+    }] });
+    else {
+      assert.match(body.messages.at(-1).content, /read-only/);
+      reply(res, { content: 'Reviewed without writing.' });
+    }
+  });
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 2, maxConcurrent: 1,
+    defaultAgent: 'reviewer', agents: { reviewer: { kind: 'byok', readOnly: true } } });
+  try {
+    const task = await runtime.start(f.repository, 'Review only');
+    const result = await waitTask(runtime, task.id);
+    assert.equal(result.status, 'needs_review');
+    assert.equal(result.summary, 'Reviewed without writing.');
+    assert.equal(await readFile(join(result.workspace, 'answer.txt'), 'utf8'), 'before');
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
+});
+
+test('CLI profiles validate executable paths and apply read-only flags', async () => {
+  const { normalizeAgents } = await import('../src/agent-config.mjs');
+  const { cliArguments, cliSummary, agentCatalog, stagePlan } = await import('../src/agents.mjs');
+  assert.throws(() => normalizeAgents({ agents: { bad: { kind: 'codex', command: ['codex.cmd'] } } }));
+  assert.throws(() => normalizeAgents({ requireApproval: 'yes' }), /boolean/);
+  assert.throws(() => normalizeAgents({ agents: { bad: { kind: 'byok', readOnly: 'yes' } } }), /boolean/);
+  const config = normalizeAgents({ agents: {
+    coder: { kind: 'codex', command: [process.execPath], apiKeyEnv: 'FAKE_KEY', readOnly: true },
+    reviewer: { kind: 'claude', command: [process.execPath], readOnly: true }
+  } }, { FAKE_KEY: 'fake-profile-secret' });
+  assert.equal(config.requireApproval, true);
+  assert.ok(!JSON.stringify(agentCatalog(config)).includes('fake-profile-secret'));
+  assert.deepEqual(stagePlan(config, ['coder', 'reviewer']), [{ agent: 'coder' }, { agent: 'reviewer' }]);
+  assert.throws(() => stagePlan(config, ['missing']));
+  assert.ok(cliArguments(config.agents.coder, { maxSteps: 3 }).includes('read-only'));
+  const claude = cliArguments(config.agents.reviewer, { maxSteps: 3 });
+  assert.ok(claude.includes('plan'));
+  assert.ok(!claude.includes('Read,Edit,Write,Glob,Grep'));
+  assert.throws(() => cliSummary('codex', '{"type":"turn.failed"}'), /unsuccessful/);
+  assert.throws(() => cliSummary('claude', '{"is_error":true,"result":"failed"}'), /unsuccessful/);
+  assert.throws(() => cliSummary('codex', 'not json'));
+});
+
+test('CLI-only configuration does not require BYOK inference settings', async () => {
+  const f = await fixture();
+  try {
+    const path = join(f.directory, 'cli-config.json');
+    await writeFile(path, JSON.stringify({ repositories: [f.repository],
+      stateDir: join(f.directory, 'state'), agents: {
+        coder: { kind: 'codex', command: [process.execPath], apiKeyEnv: 'TEST_CODEX_KEY' }
+      } }));
+    const config = loadConfig({ BYOK_CONFIG: path, TEST_CODEX_KEY: 'fake-codex-key' });
+    assert.equal(config.defaultAgent, 'coder');
+    assert.deepEqual(config.secrets, ['fake-codex-key']);
+    assert.equal(config.agents.coder.apiKey, 'fake-codex-key');
+  } finally { await f.remove(); }
+});
+
+test('a paused task cannot silently switch to a removed agent profile', async () => {
+  const f = await fixture();
+  const config = { repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    checks: [], maxSteps: 1, maxConcurrent: 1, requireApproval: true,
+    defaultAgent: 'coder', agents: { coder: { kind: 'byok' } } };
+  const runtime = new Runtime(config);
+  try {
+    const task = await runtime.start(f.repository, 'Pause before executing');
+    assert.equal((await waitTask(runtime, task.id)).status, 'awaiting_approval');
+    delete config.agents.coder;
+    assert.throws(() => runtime.decide(task.id, 0, true), /configured agents/);
+    assert.equal(runtime.store.get(task.id).stageIndex, 0);
+    assert.equal(runtime.cancel(task.id).status, 'cancelled');
+  } finally {
+    await runtime.close();
+    await f.remove();
+  }
+});

@@ -4,7 +4,7 @@ import { runAgent } from './provider.mjs';
 export function agentCatalog(config) {
   return Object.entries(config.agents ?? { byok: { kind: 'byok' } }).map(([name, p]) => ({
     name, kind: p.kind, model: p.model ?? (p.kind === 'byok' ? config.model : undefined),
-    instruction: p.instruction ?? ''
+    instruction: p.instruction ?? '', readOnly: p.readOnly ?? false
   }));
 }
 
@@ -18,9 +18,9 @@ export function stagePlan(config, names) {
 
 export function cliArguments(profile, config) {
   const model = profile.model ? ['--model', profile.model] : [];
-  if (profile.kind === 'codex') return ['exec', '--json', '--sandbox', 'workspace-write', ...model, '-'];
-  return ['-p', '--output-format', 'json', '--permission-mode', 'acceptEdits',
-    '--tools', 'Read,Edit,Write,Glob,Grep', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+  if (profile.kind === 'codex') return ['exec', '--json', '--sandbox', profile.readOnly ? 'read-only' : 'workspace-write', ...model, '-'];
+  return ['-p', '--output-format', 'json', '--permission-mode', profile.readOnly ? 'plan' : 'acceptEdits',
+    '--tools', profile.readOnly ? 'Read,Glob,Grep' : 'Read,Edit,Write,Glob,Grep', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
     '--max-turns', String(config.maxSteps), ...model];
 }
 
@@ -41,6 +41,7 @@ export function cliSummary(kind, stdout) {
 
 export async function runStage(config, task, store, signal) {
   const name = task.stages[task.stageIndex].agent;
+  if (config.agents && !Object.hasOwn(config.agents, name)) throw new Error('Configured stage agent is no longer available.');
   const profile = config.agents?.[name] ?? { kind: 'byok' };
   const previous = (task.stageResults ?? []).map(r => ({ agent: r.agent, summary: r.summary }));
   const changes = task.stageIndex ? await diffWorkspace(task, signal) : undefined;
@@ -50,7 +51,7 @@ export async function runStage(config, task, store, signal) {
     changes ? 'Current changes: ' + JSON.stringify(changes).slice(0, 60000) : ''].filter(Boolean).join('\n\n');
   store.event(task.id, 'stage_started', { index: task.stageIndex, agent: name, kind: profile.kind });
   if (profile.kind === 'byok') {
-    return runAgent({ ...config, model: profile.model ?? config.model, apiKey: profile.apiKey ?? config.apiKey }, { ...task, goal: brief }, store, signal);
+    return runAgent({ ...config, model: profile.model ?? config.model, apiKey: profile.apiKey ?? config.apiKey, readOnly: profile.readOnly ?? false }, { ...task, goal: brief }, store, signal);
   }
   const env = {};
   if (profile.apiKey) env[profile.kind === 'codex' ? 'CODEX_API_KEY' : 'ANTHROPIC_API_KEY'] = profile.apiKey;

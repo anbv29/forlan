@@ -39,6 +39,7 @@ export function decideCheckpoint(runtime, id, expectedStage, approved) {
   const task = runtime.store.get(id);
   if (runtime.active.has(id)) throw new Error('Task still has an active operation.');
   if (task.status !== 'awaiting_approval' || task.stageIndex !== expectedStage) throw new Error('Checkpoint is stale or unavailable.');
+  stagePlan(runtime.config, task.stages.map(stage => stage.agent));
   if (!approved) {
     runtime.store.event(id, 'approval_rejected', { stageIndex: expectedStage });
     return runtime.store.update(id, { status: 'cancelled', checkpoint: null });
