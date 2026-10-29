@@ -9,12 +9,15 @@ export function commandEnv() {
   return Object.fromEntries(allowed.filter(key => process.env[key]).map(key => [key, process.env[key]]));
 }
 
-export function command(executable, args, cwd, signal, timeout = 120000) {
+export function command(executable, args, cwd, signal, timeout = 120000, options = {}) {
   signal?.throwIfAborted();
   return new Promise((resolveResult, reject) => {
     const child = spawn(executable, args, { cwd, shell: false, detached: process.platform !== 'win32',
-      windowsHide: true, env: commandEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+      windowsHide: true, env: { ...commandEnv(), ...options.env }, stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '';
+    let stdout = '';
+    child.stdin.on('error', () => {});
+    child.stdin.end(options.input ?? '');
     let overflow = false;
     let timedOut = false;
     const kill = () => {
@@ -40,13 +43,13 @@ export function command(executable, args, cwd, signal, timeout = 120000) {
       output += data.toString();
       if (output.length > 200000) { overflow = true; output = output.slice(0, 200000); kill(); }
     };
-    child.stdout.on('data', collect);
+    child.stdout.on('data', data => { stdout = (stdout + data.toString()).slice(0, 200000); collect(data); });
     child.stderr.on('data', collect);
     child.on('error', error => { cleanup(); reject(error); });
     child.on('close', (code, killedSignal) => {
       cleanup();
       if (signal?.aborted) { reject(signal.reason); return; }
-      resolveResult({ code: timedOut || overflow ? -1 : code ?? -1, output,
+      resolveResult({ code: timedOut || overflow ? -1 : code ?? -1, output, stdout,
         truncated: overflow, timedOut, signal: killedSignal });
     });
   });
