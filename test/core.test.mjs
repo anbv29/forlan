@@ -137,7 +137,7 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
   const stateDir = join(f.directory, 'state');
   await writeFile(configPath, JSON.stringify({
     repositories: [f.repository], stateDir, baseUrl: provider.baseUrl,
-    model: 'fixture-model', maxSteps: 5, maxConcurrent: 1,
+    model: 'fixture-model', requireApproval: false, maxSteps: 5, maxConcurrent: 1,
     checks: [[process.execPath, '-e',
       "if(require('node:fs').readFileSync('answer.txt','utf8')!=='after')process.exit(1)"]]
   }));
@@ -159,7 +159,7 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
   };
   try {
     await connect();
-    assert.equal((await client.listTools()).tools.length, 9);
+    assert.equal((await client.listTools()).tools.length, 11);
     assert.equal((await invoke('get_configuration')).model, 'fixture-model');
     const task = await invoke('start_task', { repository: f.repository, goal: 'Update answer and add notes.' });
     let final;

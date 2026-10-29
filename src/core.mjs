@@ -1,3 +1,4 @@
+import { normalizeAgents } from './agent-config.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -12,9 +13,11 @@ export function contained(root, target) {
 export function loadConfig(env = process.env) {
   if (!env.BYOK_CONFIG || !isAbsolute(env.BYOK_CONFIG)) throw new Error('Set BYOK_CONFIG to an absolute configuration path.');
   const raw = JSON.parse(readFileSync(env.BYOK_CONFIG, 'utf8'));
+  const profiles = normalizeAgents(raw, env);
+  const needsByok = Object.values(profiles.agents).some(p => p.kind === 'byok');
   if (!Array.isArray(raw.repositories) || !raw.repositories.length) throw new Error('Configure repositories.');
-  if (typeof raw.model !== 'string' || !raw.model.trim()) throw new Error('Configure a model.');
-  const endpoint = new URL(raw.baseUrl);
+  if (needsByok && (typeof raw.model !== 'string' || !raw.model.trim())) throw new Error('Configure a model.');
+  const endpoint = new URL(raw.baseUrl ?? (needsByok ? '' : 'http://127.0.0.1'));
   const local = ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname);
   if (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && local)) throw new Error('Use HTTPS or loopback HTTP.');
   if (endpoint.username || endpoint.password || endpoint.search || endpoint.hash) throw new Error('Invalid baseUrl.');
@@ -25,7 +28,7 @@ export function loadConfig(env = process.env) {
   const apiKeyEnv = raw.apiKeyEnv ?? 'BYOK_API_KEY';
   if (typeof apiKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(apiKeyEnv)) throw new Error('Invalid apiKeyEnv.');
   const apiKey = env[apiKeyEnv];
-  if (!local && !apiKey) throw new Error('Set the configured API key environment variable.');
+  if (needsByok && !local && !apiKey && Object.values(profiles.agents).some(p => p.kind === 'byok' && !p.apiKey)) throw new Error('Set the configured API key environment variable.');
   const checks = raw.checks ?? [];
   if (!Array.isArray(checks) || checks.some(c => !Array.isArray(c) || !c.length || c.some(a => typeof a !== 'string' || !a))) throw new Error('checks must contain command argument arrays.');
   const stateDir = resolve(raw.stateDir ?? join(homedir(), '.byok-agent-mcp'));
@@ -35,7 +38,8 @@ export function loadConfig(env = process.env) {
   if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 100) throw new Error('maxSteps must be 1–100.');
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 8) throw new Error('maxConcurrent must be 1–8.');
   return { repositories, model: raw.model, baseUrl: endpoint.href.replace(/\/$/, ''),
-    apiKey, apiKeyEnv, stateDir, checks, maxSteps, maxConcurrent };
+    apiKey, apiKeyEnv, stateDir, checks, maxSteps, maxConcurrent, ...profiles,
+    secrets: [apiKey, ...Object.values(profiles.agents).map(p => p.apiKey)].filter(Boolean) };
 }
 
 export class Store {
@@ -102,5 +106,5 @@ export function redact(text, secrets = []) {
 }
 
 export function safeError(error, config) {
-  return redact(error instanceof Error ? error.message : 'Operation failed.', [config.apiKey]);
+  return redact(error instanceof Error ? error.message : 'Operation failed.', config.secrets ?? [config.apiKey]);
 }

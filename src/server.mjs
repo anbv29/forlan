@@ -1,3 +1,4 @@
+import { agentCatalog } from './agents.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -26,12 +27,12 @@ export function createServer(config) {
 
   register('get_configuration', 'Inspect configured repositories, model and checks. Never returns API keys.',
     {}, () => ({ repositories: config.repositories, model: config.model,
-      checks: config.checks, maxSteps: config.maxSteps, maxConcurrent: config.maxConcurrent }), true);
+      checks: config.checks, maxSteps: config.maxSteps, maxConcurrent: config.maxConcurrent, requireApproval: config.requireApproval ?? false, agents: agentCatalog(config) }), true);
 
   register('start_task', 'Start a BYOK coding task in a new Git worktree. Returns immediately. ' +
     'Sends repository files to the configured inference endpoint. Changes require human review.',
-    { repository: z.string().min(1), goal: z.string().trim().min(1).max(20000) },
-    ({ repository, goal }) => runtime.start(repository, goal));
+    { repository: z.string().min(1), goal: z.string().trim().min(1).max(20000), agents: z.array(z.string()).min(1).max(8).optional() },
+    ({ repository, goal, agents }) => runtime.start(repository, goal, agents));
 
   register('list_tasks', 'List the latest 100 persisted tasks.',
     {}, () => runtime.store.list(), true);
@@ -61,6 +62,26 @@ export function createServer(config) {
 
   register('cancel_task', 'Request cancellation of an active task or check operation. Poll status afterward.',
     id, ({ taskId }) => runtime.cancel(taskId));
+
+  register('list_agents', 'List configured coding-agent profiles without credentials.',
+    {}, () => ({ agents: agentCatalog(config) }), true);
+
+  register('review_checkpoint', 'Ask the human user to approve or reject the next agent stage. ' +
+    'Requires an MCP client supporting form elicitation; approval cannot be supplied as a tool argument.',
+    { ...id, stageIndex: z.number().int().nonnegative() }, async ({ taskId, stageIndex }) => {
+      const task = runtime.store.get(taskId);
+      if (task.status !== 'awaiting_approval' || task.stageIndex !== stageIndex) throw new Error('Checkpoint unavailable.');
+      if (!server.server.getClientCapabilities()?.elicitation) throw new Error('This client must support MCP form elicitation for approval.');
+      const response = await server.server.elicitInput({
+        mode: 'form', message: 'Run stage ' + (stageIndex + 1) + ' using ' +
+          task.stages[stageIndex].agent + '? Task: ' + task.goal + '. Worktree: ' + task.workspace,
+        requestedSchema: { type: 'object', properties: {
+          approve: { type: 'boolean', title: 'Approve execution', default: false }
+        }, required: ['approve'] }
+      });
+      if (response.action === 'cancel') return { id: taskId, status: 'awaiting_approval' };
+      return runtime.decide(taskId, stageIndex, response.action === 'accept' && response.content?.approve === true);
+    });
 
   let closePromise;
   const close = () => closePromise ??= runtime.close();
