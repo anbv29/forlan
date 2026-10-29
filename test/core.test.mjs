@@ -264,3 +264,109 @@ test('model-step limit stops repeated tool calls and preserves a reviewable work
     await f.remove();
   }
 });
+
+test('agent pipeline hands off changes and preserves checkpoints across restart', async () => {
+  const { normalizeAgents } = await import('../src/agent-config.mjs');
+  const f = await fixture();
+  const fake = join(f.directory, 'agent.cjs');
+  await writeFile(fake, [
+    "const fs = require('node:fs'); let input='';",
+    "process.stdin.on('data', x => input += x);",
+    "process.stdin.on('end', () => {",
+    "const codex = process.argv.includes('exec');",
+    "if(codex) { fs.writeFileSync('answer.txt','implemented');",
+    "console.error('stderr is not a JSON event');",
+    "console.log(JSON.stringify({type:'item.completed',item:{type:'agent_message',text:'Implementation complete.'}})); }",
+    "else { if(!input.includes('Implementation complete.') || !input.includes('+implemented')) process.exit(3);",
+    "console.log(JSON.stringify({result:'Review saw implementation.',is_error:false})); }",
+    "});"
+  ].join('\n'));
+  const config = { repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    checks: [], maxSteps: 2, maxConcurrent: 1,
+    ...normalizeAgents({ agents: {
+      implement: { kind: 'codex', command: [process.execPath, fake] },
+      review: { kind: 'claude', command: [process.execPath, fake] }
+    }, defaultAgent: 'implement' }) };
+  let runtime = new Runtime(config);
+  try {
+    const task = await runtime.start(f.repository, 'Implement then review', ['implement', 'review']);
+    const pending = await waitTask(runtime, task.id);
+    assert.equal(pending.status, 'awaiting_approval');
+    assert.equal(pending.stageIndex, 0);
+    assert.equal(await readFile(join(pending.workspace, 'answer.txt'), 'utf8'), 'before');
+    runtime.decide(task.id, 0, true);
+    const boundary = await waitTask(runtime, task.id);
+    assert.equal(boundary.status, 'awaiting_approval');
+    assert.equal(boundary.stageIndex, 1);
+    assert.match(boundary.stageResults[0].summary, /Implementation complete/);
+    assert.throws(() => runtime.decide(task.id, 0, true), /stale/);
+    await runtime.close();
+    runtime = new Runtime(config);
+    assert.equal(runtime.store.get(task.id).status, 'awaiting_approval');
+    runtime.decide(task.id, 1, true);
+    const final = await waitTask(runtime, task.id);
+    assert.equal(final.status, 'needs_review');
+    assert.equal(final.stageResults.length, 2);
+    assert.equal(final.summary, 'Review saw implementation.');
+    assert.equal(final.checks.passed, false);
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
+    const rejected = await runtime.start(f.repository, 'Reject this', ['implement']);
+    await waitTask(runtime, rejected.id);
+    runtime.decide(rejected.id, 0, false);
+    assert.equal(runtime.store.get(rejected.id).status, 'cancelled');
+    assert.throws(() => runtime.decide(rejected.id, 0, true), /stale/);
+    assert.equal(runtime.store.get(rejected.id).stageResults.length, 0);
+  } finally { await runtime.close(); await f.remove(); }
+});
+
+test('MCP checkpoint review requires a user elicitation response', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const { ElicitRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
+  const { createServer: makeServer } = await import('../src/server.mjs');
+  const f = await fixture();
+  let modelCalls = 0;
+  const provider = await mockProvider((_req, res) => {
+    modelCalls++;
+    reply(res, { content: 'Approved task finished.' });
+  });
+  const app = makeServer({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 2,
+    maxConcurrent: 1, requireApproval: true });
+  const client = new Client({ name: 'human-client', version: '1' },
+    { capabilities: { elicitation: { form: {} } } });
+  let prompts = 0;
+  let decision = true;
+  client.setRequestHandler(ElicitRequestSchema, async request => {
+    prompts++;
+    assert.match(request.params.message, /Run stage 1/);
+    return { action: 'accept', content: { approve: decision } };
+  });
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([app.server.connect(left), client.connect(right)]);
+    const task = await app.runtime.start(f.repository, 'Wait for user');
+    await waitTask(app.runtime, task.id);
+    assert.equal(modelCalls, 0);
+    const approved = await client.callTool({ name: 'review_checkpoint',
+      arguments: { taskId: task.id, stageIndex: 0 } });
+    assert.ok(!approved.isError, JSON.stringify(approved));
+    assert.equal(prompts, 1);
+    assert.equal((await waitTask(app.runtime, task.id)).status, 'needs_review');
+    assert.equal(modelCalls, 1);
+    decision = false;
+    const rejected = await app.runtime.start(f.repository, 'User rejects');
+    await waitTask(app.runtime, rejected.id);
+    await client.callTool({ name: 'review_checkpoint', arguments: { taskId: rejected.id, stageIndex: 0 } });
+    assert.equal(app.runtime.store.get(rejected.id).status, 'cancelled');
+    assert.equal(modelCalls, 1);
+    const stale = await client.callTool({ name: 'review_checkpoint', arguments: { taskId: rejected.id, stageIndex: 0 } });
+    assert.equal(stale.isError, true);
+    assert.equal(prompts, 2);
+  } finally {
+    await client.close();
+    await app.close();
+    await provider.close();
+    await f.remove();
+  }
+});
