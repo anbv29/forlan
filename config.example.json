@@ -1,10 +1,24 @@
 {
-  "repositories": ["C:/absolute/path/to/your/repository"],
+  "repositories": [
+    "C:/absolute/path/to/your/repository"
+  ],
   "stateDir": "C:/absolute/path/outside/repositories/byok-state",
   "baseUrl": "https://your-provider.example/v1",
   "model": "your-tool-capable-model",
   "apiKeyEnv": "BYOK_API_KEY",
   "maxSteps": 20,
   "maxConcurrent": 2,
-  "checks": [["node", "--test"]]
+  "checks": [
+    [
+      "node",
+      "--test"
+    ]
+  ],
+  "requireApproval": true,
+  "defaultAgent": "byok",
+  "agents": {
+    "byok": {
+      "kind": "byok"
+    }
+  }
 }

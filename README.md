@@ -37,6 +37,40 @@ Example client configuration; adapt the surrounding structure to your client:
 
 Supply BYOK_API_KEY separately using your client's secret/environment support.
 
+## Agents and approval checkpoints
+
+Configure agents as a map of names to profiles. Kinds are byok, codex and claude.
+CLI profiles require an absolute native executable command; for an npm CLI use
+node.exe followed by its absolute JavaScript entry point. Do not launch .cmd or .ps1 wrappers.
+Use defaultAgent to select a single default runner. Optional model overrides are per profile.
+Use start_task with agents: ["codex", "reviewer"] for a sequential pipeline.
+Stages share one worktree, earlier summaries and the current diff. They do not edit concurrently.
+Separate tasks can still execute concurrently up to maxConcurrent.
+Set readOnly: true for a reviewer. BYOK stages enforce read-only tool access; CLI stages
+select Codex read-only sandbox or Claude plan mode with read-only file tools.
+This does not add a new operating-system sandbox around Claude.
+
+requireApproval defaults to true for loaded configurations. Tasks pause before the
+first stage and each subsequent stage. Inspect status/diff, then call review_checkpoint
+with taskId and stageIndex. A client form asks the human to approve or reject.
+A model cannot supply approval in tool arguments. Canceling the prompt leaves the task paused.
+Clients without form elicitation cannot approve; they can still inspect or cancel.
+An owner can explicitly disable checkpoints with requireApproval: false in the config.
+Pending checkpoints survive restart. Interrupted active stages still do not resume automatically.
+Approval authorizes the next stage and its configured verification workflow.
+
+CLI authentication can use the CLI account already configured on the machine, or a
+profile apiKeyEnv. Only that profile key is passed as CODEX_API_KEY or ANTHROPIC_API_KEY.
+These native agents manage their own inference and permissions; their credentials
+may be inherited by processes they launch. Server-owned check commands omit provider keys.
+If only CLI profiles are configured, global BYOK model, baseUrl and key are optional.
+agentTimeoutMs bounds each CLI process; maxSteps bounds BYOK tool rounds and Claude turns.
+Codex has a deadline but no equivalent model-step limit.
+
+The multi-agent example is config.pipeline.example.json. Replace every path, configure
+its three key environment variables, and use a client supporting form elicitation.
+Use config.example.json for a BYOK-only installation. No keys belong in either JSON file.
+
 ## Tools
 
 | Tool | Purpose |
@@ -50,6 +84,8 @@ Supply BYOK_API_KEY separately using your client's secret/environment support.
 | read_task_file | Review file contents, including new files |
 | run_checks | Rerun owner-configured commands |
 | cancel_task | Request cancellation |
+| list_agents | Inspect named profiles without credentials |
+| review_checkpoint | Ask the human to approve or reject a stage |
 
 Ask your client to start a small task, poll status, then show its diff and new files.
 Tasks use a new branch and worktree based on committed HEAD.
@@ -62,8 +98,8 @@ Checks are executable-and-argument arrays with no shell parsing.
 On Windows prefer node with explicit script paths; .cmd wrappers are not interpreted.
 Project dependencies must already be available in the worktree.
 Checks run after model completion. Unconfigured checks never count as passed.
-Terminal states include needs_review, checks_failed, failed and cancelled.
-Closing the client cancels active operations. The server must remain running.
+Paused tasks use awaiting_approval. Terminal states include needs_review, checks_failed, failed and cancelled.
+Closing the client cancels active operations; pending checkpoints remain paused. The server must remain running.
 Restart marks unfinished records interrupted without resuming them.
 Worktrees, branches and SQLite history remain for inspection; cleanup is manual.
 
@@ -76,15 +112,17 @@ File tools reject traversal, .git, .env files, links and alternate file streams.
 This is not a race-proof filesystem or network sandbox.
 Files read by the model are sent to your configured provider.
 Other secret-bearing files are not automatically detected.
-Provider keys are redacted from task records and omitted from command environments.
+Provider keys are redacted from task records and omitted from server-owned check environments.
+Native CLI agents receive their selected credentials and use their own permission controls.
 Usage is recorded when provided. Limits do not guarantee a monetary budget.
-Direct Anthropic APIs, cloud hosting, scheduling and multi-agent execution are future work.
+Direct Anthropic API integration, cloud hosting, scheduling and parallel stages within one task are future work.
 
 ## Tests and Git history
 
-Run npm run check and npm test. Eight behavior tests use a local mock provider,
+Run npm run check and npm test. Fourteen behavior tests use a local mock provider and CLI subprocess fixtures,
 real Git worktrees and the real MCP transport without spending API credits.
-Live provider compatibility has not been tested.
+Installed Codex and Claude CLI help was checked. Authenticated live model runs have not been tested.
+CLI contracts: https://developers.openai.com/codex/noninteractive and https://code.claude.com/docs/en/cli-reference
 
 This session blocks writes to the default .git directory. Actual commits are in
 work/byok-history. Inspect them with ./scripts/git.ps1 log --oneline.

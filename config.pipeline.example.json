@@ -1,0 +1,42 @@
+{
+  "repositories": [
+    "C:/absolute/path/to/your/repository"
+  ],
+  "stateDir": "C:/absolute/path/outside/repositories/byok-state",
+  "baseUrl": "https://your-provider.example/v1",
+  "model": "your-tool-capable-model",
+  "apiKeyEnv": "BYOK_API_KEY",
+  "requireApproval": true,
+  "defaultAgent": "byok",
+  "maxSteps": 20,
+  "maxConcurrent": 2,
+  "agentTimeoutMs": 600000,
+  "agents": {
+    "byok": {
+      "kind": "byok"
+    },
+    "codex": {
+      "kind": "codex",
+      "command": [
+        "C:/absolute/path/to/node.exe",
+        "C:/absolute/path/to/@openai/codex/bin/codex.js"
+      ],
+      "apiKeyEnv": "MY_CODEX_KEY"
+    },
+    "reviewer": {
+      "kind": "claude",
+      "command": [
+        "C:/absolute/path/to/claude.exe"
+      ],
+      "apiKeyEnv": "MY_ANTHROPIC_KEY",
+      "readOnly": true,
+      "instruction": "Review the preceding implementation. Report concrete defects and verification gaps."
+    }
+  },
+  "checks": [
+    [
+      "node",
+      "--test"
+    ]
+  ]
+}
