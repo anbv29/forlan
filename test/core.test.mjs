@@ -486,6 +486,12 @@ test('dependency snapshots transfer text edits and additions', async () => {
     await applyChanges(to.workspace, files);
     assert.equal(await readFile(join(to.workspace, 'answer.txt'), 'utf8'), 'updated');
     assert.equal(await readFile(join(to.workspace, 'new.txt'), 'utf8'), 'new');
+    await (await import('node:fs/promises')).unlink(join(from.workspace, 'answer.txt'));
+    const removed = await captureChanges({ ...from, base });
+    assert.equal(removed['answer.txt'], null);
+    await applyChanges(to.workspace, removed);
+    await assert.rejects(readFile(join(to.workspace, 'answer.txt')));
+    assert.equal(await readFile(join(to.workspace, 'new.txt'), 'utf8'), 'new');
   } finally { await f.remove(); }
 });
 
@@ -569,4 +575,98 @@ test('planned parallel tasks feed a dependent task and integrate into one review
     await provider.close();
     await f.remove();
   }
+});
+
+test('MCP project planning and integration require human approval forms', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const { ElicitRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
+  const { createServer: makeServer } = await import('../src/server.mjs');
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res, body) => {
+    calls++;
+    reply(res, { content: body.messages[1].content.includes('split the goal') ?
+      '{"nodes":[{"key":"code","goal":"Implement","agent":"byok","dependsOn":[]}]}' : 'Done.' });
+  });
+  const app = makeServer({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 2, maxConcurrent: 2, requireApproval: true });
+  const client = new Client({ name: 'project-client', version: '1' }, { capabilities: { elicitation: { form: {} } } });
+  let approved = false;
+  let forms = 0;
+  client.setRequestHandler(ElicitRequestSchema, async () => {
+    forms++;
+    return { action: 'accept', content: { approve: approved } };
+  });
+  const invoke = async (name, args) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.ok(!result.isError, JSON.stringify(result));
+    return JSON.parse(result.content[0].text);
+  };
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  const settle = async id => {
+    for (let i = 0; i < 600; i++) {
+      const task = app.runtime.store.get(id);
+      if (!['queued', 'running', 'orchestrating'].includes(task.status)) return task;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    throw new Error('Project stalled.');
+  };
+  try {
+    await Promise.all([app.server.connect(left), client.connect(right)]);
+    const rejected = await invoke('plan_project', { repository: f.repository, goal: 'Reject plan' });
+    await settle(rejected.id);
+    assert.equal((await invoke('review_project_plan', { taskId: rejected.id })).status, 'cancelled');
+    assert.equal(calls, 1);
+    const project = await invoke('plan_project', { repository: f.repository, goal: 'Approve plan' });
+    await settle(project.id);
+    approved = true;
+    await invoke('review_project_plan', { taskId: project.id });
+    const child = app.runtime.store.get(project.id).nodes[0].taskId;
+    assert.equal((await waitTask(app.runtime, child)).status, 'awaiting_approval');
+    assert.equal(calls, 2);
+    await invoke('review_checkpoint', { taskId: child, stageIndex: 0 });
+    await settle(project.id);
+    await invoke('integrate_project', { taskId: project.id });
+    assert.equal((await settle(project.id)).phase, 'integrated');
+    assert.equal(calls, 3);
+    assert.equal(forms, 4);
+  } finally { await client.close(); await app.close(); await provider.close(); await f.remove(); }
+});
+
+test('project integration reports conflicting edits without choosing a winner', async () => {
+  const { beginIntegration } = await import('../src/integration.mjs');
+  const f = await fixture();
+  const nodes = ['first', 'second'].map(key => ({ key, goal: key, agent: 'byok', dependsOn: [] }));
+  const provider = await mockProvider((_req, res, body) => {
+    const goal = body.messages[1].content;
+    if (goal.includes('split the goal')) reply(res, { content: JSON.stringify({ nodes }) });
+    else if (!body.messages.some(m => m.role === 'tool')) reply(res, { tool_calls: [{
+      id: 'edit', type: 'function', function: { name: 'write_file',
+        arguments: JSON.stringify({ path: 'answer.txt', content: goal.startsWith('first') ? 'first' : 'second' }) }
+    }] });
+    else reply(res, { content: 'Changed answer.' });
+  });
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 2, maxConcurrent: 2 });
+  const settle = async id => {
+    for (let i = 0; i < 600; i++) {
+      const p = runtime.store.get(id);
+      if (!['queued', 'running', 'orchestrating'].includes(p.status)) return p;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    throw new Error('Project stalled.');
+  };
+  try {
+    const p = await runtime.projects.start(f.repository, 'Conflicting work');
+    await settle(p.id);
+    runtime.projects.decide(p.id, true);
+    assert.equal((await settle(p.id)).status, 'needs_review');
+    beginIntegration(runtime.projects, p.id);
+    const final = await settle(p.id);
+    assert.equal(final.status, 'integration_conflict');
+    assert.match(final.error, /answer.txt/);
+    assert.equal(await readFile(join(final.workspace, 'answer.txt'), 'utf8'), 'before');
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
