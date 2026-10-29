@@ -471,7 +471,7 @@ test('project plans reject cycles and conflicting dependency versions', async ()
   assert.throws(() => combineChanges([{ 'a.txt': 'one' }, { 'a.txt': 'two' }]), /conflict/);
 });
 
-test('dependency snapshots transfer additions edits and deletions', async () => {
+test('dependency snapshots transfer text edits and additions', async () => {
   const { captureChanges, applyChanges } = await import('../src/plans.mjs');
   const { createWorktree, git } = await import('../src/workspace.mjs');
   const f = await fixture();
@@ -487,4 +487,86 @@ test('dependency snapshots transfer additions edits and deletions', async () => 
     assert.equal(await readFile(join(to.workspace, 'answer.txt'), 'utf8'), 'updated');
     assert.equal(await readFile(join(to.workspace, 'new.txt'), 'utf8'), 'new');
   } finally { await f.remove(); }
+});
+
+test('planned parallel tasks feed a dependent task and integrate into one review worktree', async () => {
+  const { beginIntegration } = await import('../src/integration.mjs');
+  const f = await fixture();
+  const nodes = [
+    { key: 'join', goal: 'JOIN', agent: 'byok', dependsOn: ['left', 'right'] },
+    { key: 'left', goal: 'LEFT', agent: 'byok', dependsOn: [] },
+    { key: 'right', goal: 'RIGHT', agent: 'byok', dependsOn: [] }
+  ];
+  const roots = new Set();
+  let release;
+  const bothRoots = new Promise(resolve => { release = resolve; });
+  let peak = 0;
+  let runtime;
+  const call = (id, name, args) => ({ id, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+  const provider = await mockProvider(async (_req, res, body) => {
+    const goal = body.messages[1].content;
+    const outputs = body.messages.filter(m => m.role === 'tool');
+    if (goal.includes('split the goal')) {
+      assert.ok(!body.tools.some(t => t.function.name === 'write_file'));
+      reply(res, { content: JSON.stringify({ nodes }) });
+      return;
+    }
+    if (goal.startsWith('LEFT') || goal.startsWith('RIGHT')) {
+      const key = goal.startsWith('LEFT') ? 'left' : 'right';
+      if (!outputs.length) {
+        roots.add(key);
+        peak = Math.max(peak, runtime.active.size);
+        if (roots.size === 2) release();
+        await Promise.race([bothRoots, new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error('Independent tasks did not overlap.')), 5000))]);
+        reply(res, { tool_calls: [call(key, 'write_file', { path: key + '.txt', content: key })] });
+      } else reply(res, { content: key + ' complete' });
+      return;
+    }
+    assert.ok(goal.startsWith('JOIN'));
+    assert.ok(goal.includes('left complete') && goal.includes('right complete'));
+    if (!outputs.length) reply(res, { tool_calls: [
+      call('read-left', 'read_file', { path: 'left.txt' }),
+      call('read-right', 'read_file', { path: 'right.txt' })
+    ] });
+    else if (outputs.length === 2) {
+      assert.equal(JSON.parse(outputs[0].content), 'left');
+      assert.equal(JSON.parse(outputs[1].content), 'right');
+      reply(res, { tool_calls: [call('join', 'write_file', { path: 'combined.txt', content: 'left+right' })] });
+    } else reply(res, { content: 'Combined both dependencies.' });
+  });
+  runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 4, maxConcurrent: 2 });
+  const settle = async id => {
+    for (let i = 0; i < 1000; i++) {
+      const task = runtime.store.get(id);
+      if (!['queued', 'running', 'orchestrating'].includes(task.status)) return task;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    throw new Error('Project did not settle.');
+  };
+  try {
+    const project = await runtime.projects.start(f.repository, 'Build a small feature');
+    assert.equal((await waitTask(runtime, project.id)).status, 'awaiting_plan_approval');
+    assert.equal(roots.size, 0);
+    runtime.projects.decide(project.id, true);
+    const finished = await settle(project.id);
+    assert.equal(finished.status, 'needs_review', JSON.stringify(finished));
+    assert.equal(peak, 2);
+    assert.equal(finished.results.length, 3);
+    const joined = runtime.store.get(finished.nodes.find(n => n.key === 'join').taskId);
+    assert.equal(await readFile(join(joined.workspace, 'combined.txt'), 'utf8'), 'left+right');
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
+    await assert.rejects(readFile(join(f.repository, 'combined.txt')));
+    beginIntegration(runtime.projects, project.id);
+    const integrated = await settle(project.id);
+    assert.equal(integrated.phase, 'integrated', JSON.stringify(integrated));
+    assert.equal(integrated.status, 'needs_review');
+    assert.equal(await readFile(join(integrated.workspace, 'combined.txt'), 'utf8'), 'left+right');
+    assert.deepEqual(integrated.integratedFiles.sort(), ['combined.txt', 'left.txt', 'right.txt']);
+  } finally {
+    await runtime.close();
+    await provider.close();
+    await f.remove();
+  }
 });

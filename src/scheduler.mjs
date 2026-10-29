@@ -10,15 +10,21 @@ export function pumpProjects(projects) {
   try {
     for (const project of r.store.projects().filter(p => p.status === 'orchestrating')) {
       const tasks = new Map(project.nodes.map(node => [node.key, r.store.get(node.taskId)]));
+      let changed;
+      do {
+        changed = false;
+        for (const node of project.nodes) {
+          const task = tasks.get(node.key);
+          if (task.status !== 'waiting_dependency' || !node.dependsOn.some(key => failures.has(tasks.get(key).status))) continue;
+          tasks.set(node.key, r.store.update(task.id, { status: 'blocked', error: 'A dependency did not complete successfully.' }));
+          r.store.event(project.id, 'node_blocked', { key: node.key });
+          changed = true;
+        }
+      } while (changed);
       for (const node of project.nodes) {
         const task = tasks.get(node.key);
         if (task.status !== 'waiting_dependency') continue;
         const dependencies = node.dependsOn.map(key => tasks.get(key));
-        if (dependencies.some(dep => failures.has(dep.status))) {
-          const blocked = r.store.update(task.id, { status: 'blocked', error: 'A dependency did not complete successfully.' });
-          tasks.set(node.key, blocked);
-          continue;
-        }
         if (dependencies.some(dep => dep.status !== 'needs_review') || r.active.size >= r.config.maxConcurrent) continue;
         const queued = r.store.update(task.id, { status: 'queued' });
         tasks.set(node.key, queued);
