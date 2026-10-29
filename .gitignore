@@ -6,3 +6,4 @@ node_modules/
 *.sqlite*
 outputs/
 work/
+config.local.json
