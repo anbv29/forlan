@@ -1,9 +1,10 @@
 import { openSync, closeSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Store, redact, safeError } from './core.mjs';
-import { createWorktree, diffWorkspace, checksWorkspace } from './workspace.mjs';
-import { runAgent } from './provider.mjs';
+import { Store, redact } from './core.mjs';
+import { diffWorkspace, checksWorkspace } from './workspace.mjs';
+import { stagePlan } from './agents.mjs';
+import { executePipeline, decideCheckpoint } from './workflow.mjs';
 
 function acquireLock(directory) {
   const path = join(directory, 'server.lock');
@@ -21,7 +22,7 @@ function acquireLock(directory) {
 export class Runtime {
   constructor(config) {
     this.config = config;
-    this.store = new Store(config.stateDir, [config.apiKey]);
+    this.store = new Store(config.stateDir, config.secrets ?? [config.apiKey]);
     try { this.lock = acquireLock(config.stateDir); }
     catch (error) { this.store.close(); throw error; }
     // A lock file never contains provider credentials.
@@ -32,44 +33,43 @@ export class Runtime {
   }
 
   clean(value) {
-    return JSON.parse(redact(JSON.stringify(value), [this.config.apiKey]));
+    return JSON.parse(redact(JSON.stringify(value), this.config.secrets ?? [this.config.apiKey]));
   }
 
-  async start(repository, goal) {
+  async start(repository, goal, agents) {
     if (this.closing) throw new Error('Server is shutting down.');
     const root = await realpath(repository);
     if (!this.config.repositories.includes(root)) throw new Error('Repository is not configured.');
     if (this.active.size >= this.config.maxConcurrent) throw new Error('Concurrent task limit reached.');
     if (typeof goal !== 'string' || !goal.trim() || goal.length > 20000) throw new Error('Goal must contain 1–20000 characters.');
-    const task = this.store.create(root, redact(goal, [this.config.apiKey]));
+    const stages = stagePlan(this.config, agents);
+    const created = this.store.create(root, redact(goal, this.config.secrets ?? [this.config.apiKey]));
+    const task = this.store.update(created.id, { stages, stageIndex: 0, stageResults: [] });
+    this.launch(task);
+    return task;
+  }
+
+  launch(task) {
     const controller = new AbortController();
     const entry = { controller };
     this.active.set(task.id, entry);
     entry.promise = this.execute(task, controller.signal).finally(() => this.active.delete(task.id));
-    return task;
   }
 
-  async execute(task, signal) {
-    try {
-      this.store.update(task.id, { status: 'running' });
-      const workspace = await createWorktree(this.config, task, signal);
-      task = this.store.update(task.id, workspace);
-      signal.throwIfAborted();
-      const summary = await runAgent(this.config, task, this.store, signal);
-      const checks = await checksWorkspace(this.config, task.workspace, signal);
-      signal.throwIfAborted();
-      this.store.update(task.id, this.clean({ summary, checks,
-        status: checks.configured && !checks.passed ? 'checks_failed' : 'needs_review' }));
-    } catch (error) {
-      this.store.update(task.id, { status: signal.aborted ? 'cancelled' : 'failed',
-        error: safeError(error, this.config) });
-    }
-  }
+  async execute(task, signal) { return executePipeline(this, task, signal); }
+
+  decide(id, stageIndex, approved) { return decideCheckpoint(this, id, stageIndex, approved); }
 
   cancel(id) {
     const task = this.store.get(id);
     const active = this.active.get(id);
-    if (!active) return { id, status: task.status, cancellationRequested: false };
+    if (!active) {
+      if (task.status === 'awaiting_approval') {
+        this.store.update(id, { status: 'cancelled', checkpoint: null });
+        return { id, status: 'cancelled', cancellationRequested: true };
+      }
+      return { id, status: task.status, cancellationRequested: false };
+    }
     active.controller.abort();
     return { id, status: task.status, cancellationRequested: true };
   }
