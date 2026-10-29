@@ -101,7 +101,8 @@ export class Store {
     const rows = this.db.prepare('SELECT data FROM tasks').all();
     for (const row of rows) {
       const task = JSON.parse(row.data);
-      if (['queued', 'running'].includes(task.status)) this.update(task.id, { status: 'interrupted' });
+      if (task.kind === 'project' && task.status === 'orchestrating') this.update(task.id, { status: 'paused_project' });
+      else if (['queued', 'running'].includes(task.status)) this.update(task.id, { status: 'interrupted' });
     }
   }
 

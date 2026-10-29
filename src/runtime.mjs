@@ -1,3 +1,4 @@
+import { Projects } from './projects.mjs';
 import { openSync, closeSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -30,6 +31,7 @@ export class Runtime {
     this.store.recover();
     this.active = new Map();
     this.closing = false;
+    this.projects = new Projects(this);
   }
 
   clean(value) {
@@ -53,19 +55,27 @@ export class Runtime {
     const controller = new AbortController();
     const entry = { controller };
     this.active.set(task.id, entry);
-    entry.promise = this.execute(task, controller.signal).finally(() => this.active.delete(task.id));
+    entry.promise = this.execute(task, controller.signal).finally(() => {
+      this.active.delete(task.id);
+      this.projects.pump();
+    });
   }
 
-  async execute(task, signal) { return executePipeline(this, task, signal); }
+  async execute(task, signal) { return task.kind === 'project' ? this.projects.generate(task, signal) : executePipeline(this, task, signal); }
 
   decide(id, stageIndex, approved) { return decideCheckpoint(this, id, stageIndex, approved); }
 
   cancel(id) {
     const task = this.store.get(id);
+    if (task.kind === 'project') {
+      this.projects.cancel(id);
+      return { id, status: 'cancelled', cancellationRequested: true };
+    }
     const active = this.active.get(id);
     if (!active) {
-      if (task.status === 'awaiting_approval') {
+      if (['awaiting_approval', 'waiting_dependency'].includes(task.status)) {
         this.store.update(id, { status: 'cancelled', checkpoint: null });
+        this.projects.pump();
         return { id, status: 'cancelled', cancellationRequested: true };
       }
       return { id, status: task.status, cancellationRequested: false };
@@ -97,7 +107,7 @@ export class Runtime {
           ? (checks.configured && !checks.passed ? 'checks_failed' : 'needs_review') : task.status;
         this.store.update(id, { checks, status });
         return checks;
-      }).finally(() => this.active.delete(id));
+      }).finally(() => { this.active.delete(id); this.projects.pump(); });
     return entry.promise;
   }
 

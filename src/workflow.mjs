@@ -7,6 +7,7 @@ export async function executePipeline(runtime, task, signal) {
   try {
     store.update(task.id, { status: 'running' });
     if (!task.workspace) task = store.update(task.id, await createWorktree(config, task, signal));
+    task = await runtime.projects.prepare(task, signal);
     task = store.update(task.id, { stages: task.stages ?? stagePlan(config),
       stageIndex: task.stageIndex ?? 0, stageResults: task.stageResults ?? [] });
     while (task.stageIndex < task.stages.length) {

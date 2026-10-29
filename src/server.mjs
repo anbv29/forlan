@@ -1,3 +1,4 @@
+import { resumeProject } from './scheduler.mjs';
 import { agentCatalog } from './agents.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -82,6 +83,31 @@ export function createServer(config) {
       if (response.action === 'cancel') return { id: taskId, status: 'awaiting_approval' };
       return runtime.decide(taskId, stageIndex, response.action === 'accept' && response.content?.approve === true);
     });
+
+  register('plan_project', 'Inspect a repository read-only and generate a dependency graph. ' +
+    'This calls the selected model but executes no implementation tasks until plan approval.',
+    { repository: z.string().min(1), goal: z.string().trim().min(1).max(20000), planner: z.string().optional() },
+    ({ repository, goal, planner }) => runtime.projects.start(repository, goal, planner));
+
+  register('review_project_plan', 'Ask the human to approve the generated task graph and its model execution.',
+    id, async ({ taskId }) => {
+      const project = runtime.store.get(taskId);
+      if (project.kind !== 'project' || project.status !== 'awaiting_plan_approval') throw new Error('Plan unavailable.');
+      if (!server.server.getClientCapabilities()?.elicitation) throw new Error('MCP form elicitation is required.');
+      const response = await server.server.elicitInput({
+        mode: 'form', message: 'Approve parallel implementation of this plan? Each node gets a separate worktree. ' +
+          JSON.stringify(project.nodes.map(n => ({ ...n, goal: n.goal.slice(0, 500) }))),
+        requestedSchema: { type: 'object', properties: {
+          approve: { type: 'boolean', title: 'Approve this plan', default: false }
+        }, required: ['approve'] }
+      });
+      if (response.action === 'cancel') return { id: taskId, status: project.status };
+      return runtime.projects.decide(taskId, response.action === 'accept' && response.content?.approve === true);
+    });
+
+  register('resume_project', 'Resume an already-approved project paused after server restart. ' +
+    'Interrupted active children are not rerun automatically.', id,
+    ({ taskId }) => resumeProject(runtime.projects, taskId));
 
   let closePromise;
   const close = () => closePromise ??= runtime.close();

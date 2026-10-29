@@ -66,7 +66,8 @@ export async function createWorktree(config, task, signal) {
   if (!config.repositories.includes(root)) throw new Error('Repository is not configured.');
   const top = await realpath((await git(['rev-parse', '--show-toplevel'], root, signal)).trim());
   if (root !== top) throw new Error('Configure the repository root, not a subdirectory.');
-  const base = (await git(['rev-parse', 'HEAD'], root, signal)).trim();
+  if (task.baseRef && !/^[a-f0-9]{40,64}$/.test(task.baseRef)) throw new Error('Invalid pinned base commit.');
+  const base = (await git(['rev-parse', task.baseRef ?? 'HEAD'], root, signal)).trim();
   const workspace = join(config.stateDir, 'worktrees', task.id);
   await mkdir(dirname(workspace), { recursive: true });
   const branch = 'byok/' + task.id;

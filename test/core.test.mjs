@@ -159,7 +159,7 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
   };
   try {
     await connect();
-    assert.equal((await client.listTools()).tools.length, 11);
+    assert.equal((await client.listTools()).tools.length, 14);
     assert.equal((await invoke('get_configuration')).model, 'fixture-model');
     const task = await invoke('start_task', { repository: f.repository, goal: 'Update answer and add notes.' });
     let final;
