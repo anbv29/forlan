@@ -1,3 +1,4 @@
+import { integrateProject } from './integration.mjs';
 import { Projects } from './projects.mjs';
 import { openSync, closeSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
@@ -61,7 +62,9 @@ export class Runtime {
     });
   }
 
-  async execute(task, signal) { return task.kind === 'project' ? this.projects.generate(task, signal) : executePipeline(this, task, signal); }
+  async execute(task, signal) {
+    if (task.kind === 'project' && task.phase === 'integration') return integrateProject(this.projects, task, signal);
+    return task.kind === 'project' ? this.projects.generate(task, signal) : executePipeline(this, task, signal); }
 
   decide(id, stageIndex, approved) { return decideCheckpoint(this, id, stageIndex, approved); }
 

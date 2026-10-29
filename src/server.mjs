@@ -1,3 +1,4 @@
+import { beginIntegration } from './integration.mjs';
 import { resumeProject } from './scheduler.mjs';
 import { agentCatalog } from './agents.mjs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -108,6 +109,23 @@ export function createServer(config) {
   register('resume_project', 'Resume an already-approved project paused after server restart. ' +
     'Interrupted active children are not rerun automatically.', id,
     ({ taskId }) => resumeProject(runtime.projects, taskId));
+
+  register('integrate_project', 'Ask the human to combine completed leaf tasks into the project worktree and run checks. ' +
+    'Conflicting versions of a file stop integration; the original checkout is never modified.',
+    id, async ({ taskId }) => {
+      const project = runtime.store.get(taskId);
+      if (project.kind !== 'project' || project.status !== 'needs_review' || project.phase !== 'execution') throw new Error('Project is not ready.');
+      if (!server.server.getClientCapabilities()?.elicitation) throw new Error('MCP form elicitation is required.');
+      const response = await server.server.elicitInput({
+        mode: 'form', message: 'Combine completed task changes into ' + project.workspace +
+          ' and execute the configured checks? Original checkout stays unchanged.',
+        requestedSchema: { type: 'object', properties: {
+          approve: { type: 'boolean', title: 'Integrate and verify', default: false }
+        }, required: ['approve'] }
+      });
+      if (response.action !== 'accept' || response.content?.approve !== true) return { id: taskId, status: project.status };
+      return beginIntegration(runtime.projects, taskId);
+    });
 
   let closePromise;
   const close = () => closePromise ??= runtime.close();

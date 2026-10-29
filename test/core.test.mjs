@@ -159,7 +159,7 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
   };
   try {
     await connect();
-    assert.equal((await client.listTools()).tools.length, 14);
+    assert.equal((await client.listTools()).tools.length, 15);
     assert.equal((await invoke('get_configuration')).model, 'fixture-model');
     const task = await invoke('start_task', { repository: f.repository, goal: 'Update answer and add notes.' });
     let final;
@@ -453,4 +453,38 @@ test('a paused task cannot silently switch to a removed agent profile', async ()
     await runtime.close();
     await f.remove();
   }
+});
+
+test('project plans reject cycles and conflicting dependency versions', async () => {
+  const { validatePlan, combineChanges, parsePlan } = await import('../src/plans.mjs');
+  const config = { agents: { coder: { kind: 'byok' } } };
+  const a = { key: 'a', goal: 'Build feature', agent: 'coder', dependsOn: [] };
+  const b = { key: 'b', goal: 'Verify feature', agent: 'coder', dependsOn: ['a'] };
+  assert.deepEqual(validatePlan({ nodes: [a, b] }, config).nodes, [a, b]);
+  assert.throws(() => validatePlan({ nodes: [a, { ...b, key: 'a' }] }, config), /unique/);
+  assert.throws(() => validatePlan({ nodes: [{ ...a, dependsOn: ['b'] }, b] }, config), /cycle/);
+  assert.throws(() => validatePlan({ nodes: [{ ...a, dependsOn: ['missing'] }] }, config), /dependency/);
+  assert.throws(() => validatePlan({ nodes: [{ ...a, agent: 'missing' }] }, config), /agent/);
+  const parsed = parsePlan('{"nodes":[' + JSON.stringify(a) + ']}', config);
+  assert.equal(parsed.nodes[0].key, 'a');
+  assert.equal(combineChanges([{ 'a.txt': 'one' }, { 'a.txt': 'one', 'b.txt': null }])['b.txt'], null);
+  assert.throws(() => combineChanges([{ 'a.txt': 'one' }, { 'a.txt': 'two' }]), /conflict/);
+});
+
+test('dependency snapshots transfer additions edits and deletions', async () => {
+  const { captureChanges, applyChanges } = await import('../src/plans.mjs');
+  const { createWorktree, git } = await import('../src/workspace.mjs');
+  const f = await fixture();
+  try {
+    const config = { repositories: [f.repository], stateDir: join(f.directory, 'state') };
+    const base = await git(['rev-parse', 'HEAD'], f.repository);
+    const from = await createWorktree(config, { id: 'snapshot-from', repository: f.repository, baseRef: base });
+    const to = await createWorktree(config, { id: 'snapshot-to', repository: f.repository, baseRef: base });
+    await writeFile(join(from.workspace, 'answer.txt'), 'updated');
+    await writeFile(join(from.workspace, 'new.txt'), 'new');
+    const files = await captureChanges({ ...from, base });
+    await applyChanges(to.workspace, files);
+    assert.equal(await readFile(join(to.workspace, 'answer.txt'), 'utf8'), 'updated');
+    assert.equal(await readFile(join(to.workspace, 'new.txt'), 'utf8'), 'new');
+  } finally { await f.remove(); }
 });
