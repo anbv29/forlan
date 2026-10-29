@@ -1,4 +1,4 @@
-import { openSync, closeSync, readFileSync, unlinkSync } from 'node:fs';
+import { openSync, closeSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Store, redact, safeError } from './core.mjs';
@@ -25,7 +25,7 @@ export class Runtime {
     try { this.lock = acquireLock(config.stateDir); }
     catch (error) { this.store.close(); throw error; }
     // A lock file never contains provider credentials.
-    import('node:fs').then(({ writeSync }) => writeSync(this.lock.fd, String(process.pid)));
+    writeSync(this.lock.fd, String(process.pid));
     this.store.recover();
     this.active = new Map();
     this.closing = false;
