@@ -37,6 +37,46 @@ Example client configuration; adapt the surrounding structure to your client:
 
 Supply BYOK_API_KEY separately using your client's secret/environment support.
 
+## Planned parallel projects
+
+Use plan_project for a goal that needs several tasks. The selected planner inspects
+the committed repository read-only and returns up to twelve nodes with explicit dependencies.
+Planning itself calls the model. No implementation tasks start until a human approves
+the proposed graph through review_project_plan.
+
+The scheduler starts independent nodes concurrently up to maxConcurrent. Each node
+uses its own branch and worktree pinned to the plan's base commit. Dependencies must
+finish successfully before a dependent task starts. Their text-file additions,
+edits and deletions are transferred into the dependent worktree with summaries.
+Normal per-stage approval checkpoints still apply when requireApproval is enabled.
+
+Inspect project status for node task IDs and per-node results. Review children using
+the existing diff and file tools. A project reaching needs_review with phase execution
+has completed child tasks but has not yet combined their branches.
+
+Call integrate_project to ask the human for final integration approval. The server
+combines completed leaf-task changes into the project's worktree and runs configured
+checks again. The original checkout is untouched. No commits, pushes or merges into
+the original branch happen automatically.
+
+Conflicting versions of the same file stop integration with integration_conflict.
+This is conservative file-level integration, not a three-way merge: even edits on
+different lines of one file can require manual integration. Binary files and files
+above 100 KB are unsupported for dependency transfer; each snapshot is limited to
+500 files and 1 MB. Do not externally edit completed child worktrees while dependents
+or final integration are reading their changes.
+
+Failures block dependent nodes while independent work can finish. Cancellation of
+a project stops active children and cancels queued children. Restart pauses approved
+project queues as paused_project. Use resume_project explicitly to continue waiting
+work; interrupted active children are never silently rerun. Inspect their worktrees
+and create a new plan when an interrupted child prevents safe continuation.
+
+Suggested flow: plan_project, inspect status, review_project_plan, approve child
+checkpoints, inspect all child diffs, integrate_project, inspect the combined diff.
+MCP form elicitation is required for plan and integration approval even when
+per-stage requireApproval is disabled.
+
 ## Agents and approval checkpoints
 
 Configure agents as a map of names to profiles. Kinds are byok, codex and claude.
@@ -86,6 +126,10 @@ Use config.example.json for a BYOK-only installation. No keys belong in either J
 | cancel_task | Request cancellation |
 | list_agents | Inspect named profiles without credentials |
 | review_checkpoint | Ask the human to approve or reject a stage |
+| plan_project | Generate a read-only dependency plan |
+| review_project_plan | Ask the human to approve the task graph |
+| resume_project | Explicitly resume a paused approved project |
+| integrate_project | Approve combined changes and final checks |
 
 Ask your client to start a small task, poll status, then show its diff and new files.
 Tasks use a new branch and worktree based on committed HEAD.
@@ -115,11 +159,11 @@ Other secret-bearing files are not automatically detected.
 Provider keys are redacted from task records and omitted from server-owned check environments.
 Native CLI agents receive their selected credentials and use their own permission controls.
 Usage is recorded when provided. Limits do not guarantee a monetary budget.
-Direct Anthropic API integration, cloud hosting, scheduling and parallel stages within one task are future work.
+Direct Anthropic API integration, cloud hosting, scheduled triggers, semantic merge conflict resolution and shared team memory are future work.
 
 ## Tests and Git history
 
-Run npm run check and npm test. Fourteen behavior tests use a local mock provider and CLI subprocess fixtures,
+Run npm run check and npm test. Twenty-two behavior tests use a local mock provider and CLI subprocess fixtures,
 real Git worktrees and the real MCP transport without spending API credits.
 Installed Codex and Claude CLI help was checked. Authenticated live model runs have not been tested.
 CLI contracts: https://developers.openai.com/codex/noninteractive and https://code.claude.com/docs/en/cli-reference
