@@ -670,3 +670,103 @@ test('project integration reports conflicting edits without choosing a winner', 
     assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
   } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
+
+function seedProject(runtime, repository, nodes) {
+  const project = runtime.store.create(repository, 'Synthetic scheduler project');
+  const children = nodes.map(node => {
+    const task = runtime.store.create(repository, node.key);
+    runtime.store.update(task.id, { projectId: project.id, status: node.status,
+      stages: [{ agent: 'byok' }], stageIndex: 0, stageResults: [] });
+    return { key: node.key, goal: node.key, agent: 'byok', dependsOn: node.dependsOn, taskId: task.id };
+  });
+  return runtime.store.update(project.id, { kind: 'project', phase: 'execution',
+    status: 'orchestrating', nodes: children });
+}
+
+test('failed dependencies block reverse-ordered descendants and cancellation stops queued nodes', async () => {
+  const f = await fixture();
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    checks: [], maxSteps: 1, maxConcurrent: 2 });
+  try {
+    const project = seedProject(runtime, f.repository, [
+      { key: 'leaf', dependsOn: ['middle'], status: 'waiting_dependency' },
+      { key: 'middle', dependsOn: ['root'], status: 'waiting_dependency' },
+      { key: 'root', dependsOn: [], status: 'failed' }
+    ]);
+    runtime.projects.pump();
+    const result = runtime.store.get(project.id);
+    assert.equal(result.status, 'blocked');
+    assert.deepEqual(result.results.map(n => n.status), ['blocked', 'blocked', 'failed']);
+    assert.equal(runtime.store.events(project.id).filter(e => e.kind === 'node_blocked').length, 2);
+    assert.equal(runtime.active.size, 0);
+    const pending = seedProject(runtime, f.repository, [
+      { key: 'waiting', dependsOn: [], status: 'waiting_dependency' },
+      { key: 'approval', dependsOn: [], status: 'awaiting_approval' }
+    ]);
+    runtime.cancel(pending.id);
+    assert.equal(runtime.store.get(pending.id).status, 'cancelled');
+    for (const node of pending.nodes) assert.equal(runtime.store.get(node.taskId).status, 'cancelled');
+    assert.equal(runtime.active.size, 0);
+  } finally { await runtime.close(); await f.remove(); }
+});
+
+test('restarting projects requires explicit resume and never reruns interrupted children', async () => {
+  const { resumeProject } = await import('../src/scheduler.mjs');
+  const f = await fixture();
+  const config = { repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    checks: [], maxSteps: 1, maxConcurrent: 2 };
+  let runtime = new Runtime(config);
+  try {
+    const paused = seedProject(runtime, f.repository, [
+      { key: 'approval', dependsOn: [], status: 'awaiting_approval' }
+    ]);
+    await runtime.close();
+    runtime = new Runtime(config);
+    assert.equal(runtime.store.get(paused.id).status, 'paused_project');
+    assert.equal(runtime.store.get(paused.nodes[0].taskId).status, 'awaiting_approval');
+    assert.equal(runtime.active.size, 0);
+    assert.equal(resumeProject(runtime.projects, paused.id).status, 'orchestrating');
+    assert.equal(runtime.active.size, 0);
+    runtime.cancel(paused.id);
+    const interrupted = seedProject(runtime, f.repository, [
+      { key: 'interrupted', dependsOn: [], status: 'running' }
+    ]);
+    await runtime.close();
+    runtime = new Runtime(config);
+    assert.equal(runtime.store.get(interrupted.nodes[0].taskId).status, 'interrupted');
+    assert.throws(() => resumeProject(runtime.projects, interrupted.id), /interrupted/);
+    assert.equal(runtime.store.get(interrupted.id).status, 'paused_project');
+    assert.equal(runtime.active.size, 0);
+  } finally { await runtime.close(); await f.remove(); }
+});
+
+test('invalid generated plans fail without launching children and storage rolls back atomically', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res) => {
+    calls++;
+    reply(res, { content: '{"nodes":[{"key":"cycle","goal":"Invalid","agent":"byok","dependsOn":["cycle"]}]}' });
+  });
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 2 });
+  try {
+    assert.throws(() => runtime.store.transaction(() => {
+      runtime.store.create(f.repository, 'Rollback');
+      throw new Error('Abort transaction');
+    }), /Abort transaction/);
+    assert.equal(runtime.store.list().length, 0);
+    const project = await runtime.projects.start(f.repository, 'Invalid decomposition');
+    const result = await waitTask(runtime, project.id);
+    assert.equal(result.status, 'failed');
+    assert.match(result.error, /dependency/);
+    assert.equal(result.kind, 'project');
+    assert.ok(result.workspace);
+    assert.equal(runtime.store.list().length, 1);
+    assert.equal(calls, 1);
+    assert.equal(runtime.active.size, 0);
+  } finally {
+    await runtime.close();
+    await provider.close();
+    await f.remove();
+  }
+});
