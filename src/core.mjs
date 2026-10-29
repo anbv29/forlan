@@ -86,6 +86,17 @@ export class Store {
       .all(id, after).map(row => ({ sequence: row.seq, ...JSON.parse(row.data) }));
   }
 
+  projects() {
+    return this.db.prepare("SELECT data FROM tasks WHERE json_extract(data, '$.kind') = 'project'")
+      .all().map(row => JSON.parse(row.data));
+  }
+
+  transaction(action) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try { const result = action(); this.db.exec('COMMIT'); return result; }
+    catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+
   recover() {
     const rows = this.db.prepare('SELECT data FROM tasks').all();
     for (const row of rows) {
