@@ -111,3 +111,107 @@ test('runtime cancellation aborts inference and persists cancellation', async ()
     await f.remove();
   }
 });
+
+test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads history', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
+  const f = await fixture();
+  const calls = [];
+  const toolCall = (id, name, args) => ({ id, type: 'function',
+    function: { name, arguments: JSON.stringify(args) } });
+  const provider = await mockProvider((req, res, body) => {
+    assert.equal(req.url, '/v1/chat/completions');
+    assert.equal(req.headers.authorization, 'Bearer integration-fake-key');
+    assert.equal(body.model, 'fixture-model');
+    calls.push(body);
+    if (calls.length === 1) reply(res, { tool_calls: [toolCall('read', 'read_file', { path: 'answer.txt' })] });
+    else if (calls.length === 2) {
+      assert.equal(JSON.parse(body.messages.at(-1).content), 'before');
+      reply(res, { tool_calls: [
+        toolCall('edit', 'write_file', { path: 'answer.txt', content: 'after' }),
+        toolCall('new', 'write_file', { path: 'NOTES.md', content: 'New file for review.' })
+      ] });
+    } else reply(res, { content: 'Updated the answer and added review notes.' });
+  });
+  const configPath = join(f.directory, 'config.json');
+  const stateDir = join(f.directory, 'state');
+  await writeFile(configPath, JSON.stringify({
+    repositories: [f.repository], stateDir, baseUrl: provider.baseUrl,
+    model: 'fixture-model', maxSteps: 5, maxConcurrent: 1,
+    checks: [[process.execPath, '-e',
+      "if(require('node:fs').readFileSync('answer.txt','utf8')!=='after')process.exit(1)"]]
+  }));
+  let client;
+  const connect = async () => {
+    client = new Client({ name: 'integration-test', version: '1.0.0' });
+    const transport = new StdioClientTransport({
+      command: process.execPath, args: [resolve('src/server.mjs')],
+      env: { ...commandEnv(), BYOK_CONFIG: configPath, BYOK_API_KEY: 'integration-fake-key' },
+      stderr: 'pipe'
+    });
+    await client.connect(transport);
+  };
+  const invoke = async (name, args = {}) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.ok(!result.isError, JSON.stringify(result));
+    assert.ok(!JSON.stringify(result).includes('integration-fake-key'));
+    return JSON.parse(result.content[0].text);
+  };
+  try {
+    await connect();
+    assert.equal((await client.listTools()).tools.length, 9);
+    assert.equal((await invoke('get_configuration')).model, 'fixture-model');
+    const task = await invoke('start_task', { repository: f.repository, goal: 'Update answer and add notes.' });
+    let final;
+    for (let i = 0; i < 300; i++) {
+      final = await invoke('get_task_status', { taskId: task.id });
+      if (!['queued', 'running'].includes(final.status)) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.equal(final.status, 'needs_review', JSON.stringify(final));
+    assert.equal(final.checks.passed, true);
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
+    assert.equal(await readFile(join(final.workspace, 'answer.txt'), 'utf8'), 'after');
+    const diff = await invoke('get_task_diff', { taskId: task.id });
+    assert.match(diff.diff, /\+after/);
+    assert.deepEqual(diff.untracked, ['NOTES.md']);
+    assert.equal((await invoke('read_task_file', { taskId: task.id, path: 'NOTES.md' })).content,
+      'New file for review.');
+    const rejected = await client.callTool({ name: 'read_task_file',
+      arguments: { taskId: task.id, path: '../config.json' } });
+    assert.equal(rejected.isError, true);
+    assert.equal((await invoke('run_checks', { taskId: task.id })).passed, true);
+    assert.equal((await invoke('cancel_task', { taskId: task.id })).cancellationRequested, false);
+    assert.ok((await invoke('get_task_events', { taskId: task.id })).events.length >= 3);
+    await client.close();
+    await connect();
+    assert.equal((await invoke('get_task_status', { taskId: task.id })).status, 'needs_review');
+    assert.equal((await invoke('list_tasks'))[0].id, task.id);
+  } finally {
+    await client?.close();
+    await provider.close();
+    await f.remove();
+  }
+});
+
+test('failed verification is persisted and provider errors omit response bodies', async () => {
+  const f = await fixture();
+  let mode = 'complete';
+  const provider = await mockProvider((_req, res) => {
+    if (mode === 'error') { res.writeHead(401); res.end('private-provider-body'); }
+    else reply(res, { content: 'No changes required.' });
+  });
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [[process.execPath, '-e', 'process.exit(7)']],
+    maxSteps: 2, maxConcurrent: 1 });
+  try {
+    const first = await runtime.start(f.repository, 'Check');
+    assert.equal((await waitTask(runtime, first.id)).status, 'checks_failed');
+    mode = 'error';
+    const second = await runtime.start(f.repository, 'Provider error');
+    const failed = await waitTask(runtime, second.id);
+    assert.equal(failed.status, 'failed');
+    assert.match(failed.error, /HTTP 401/);
+    assert.ok(!JSON.stringify(failed).includes('private-provider-body'));
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
+});
