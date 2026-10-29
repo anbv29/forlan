@@ -21,7 +21,7 @@ function acquireLock(directory) {
 export class Runtime {
   constructor(config) {
     this.config = config;
-    this.store = new Store(config.stateDir);
+    this.store = new Store(config.stateDir, [config.apiKey]);
     try { this.lock = acquireLock(config.stateDir); }
     catch (error) { this.store.close(); throw error; }
     // A lock file never contains provider credentials.
@@ -86,13 +86,16 @@ export class Runtime {
     if (!task.workspace) throw new Error('Task has no worktree.');
     if (this.active.has(id)) throw new Error('Task already has an active operation.');
     if (this.closing) throw new Error('Server is shutting down.');
+    if (this.active.size >= this.config.maxConcurrent) throw new Error('Concurrent task limit reached.');
     const controller = new AbortController();
     const entry = { controller };
     this.active.set(id, entry);
     entry.promise = checksWorkspace(this.config, task.workspace, controller.signal)
       .then(result => {
         const checks = this.clean(result);
-        this.store.update(id, { checks });
+        const status = ['needs_review', 'checks_failed'].includes(task.status)
+          ? (checks.configured && !checks.passed ? 'checks_failed' : 'needs_review') : task.status;
+        this.store.update(id, { checks, status });
         return checks;
       }).finally(() => this.active.delete(id));
     return entry.promise;

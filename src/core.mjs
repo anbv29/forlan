@@ -39,8 +39,9 @@ export function loadConfig(env = process.env) {
 }
 
 export class Store {
-  constructor(stateDir) {
+  constructor(stateDir, secrets = []) {
     mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+    this.secrets = secrets;
     this.db = new DatabaseSync(join(stateDir, 'tasks.sqlite'));
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, data TEXT NOT NULL);
@@ -50,7 +51,7 @@ export class Store {
   create(repository, goal) {
     const task = { id: randomUUID(), repository, goal, status: 'queued',
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    this.db.prepare('INSERT INTO tasks VALUES (?, ?)').run(task.id, JSON.stringify(task));
+    this.db.prepare('INSERT INTO tasks VALUES (?, ?)').run(task.id, this.serialize(task));
     return task;
   }
 
@@ -62,7 +63,7 @@ export class Store {
 
   update(id, fields) {
     const task = { ...this.get(id), ...fields, updatedAt: new Date().toISOString() };
-    this.db.prepare('UPDATE tasks SET data = ? WHERE id = ?').run(JSON.stringify(task), id);
+    this.db.prepare('UPDATE tasks SET data = ? WHERE id = ?').run(this.serialize(task), id);
     return task;
   }
 
@@ -72,7 +73,7 @@ export class Store {
 
   event(id, kind, detail) {
     this.db.prepare('INSERT INTO events(task, data) VALUES (?, ?)').run(id,
-      JSON.stringify({ kind, detail, at: new Date().toISOString() }));
+      this.serialize({ kind, detail, at: new Date().toISOString() }));
   }
 
   events(id, after = 0) {
@@ -88,6 +89,8 @@ export class Store {
       if (['queued', 'running'].includes(task.status)) this.update(task.id, { status: 'interrupted' });
     }
   }
+
+  serialize(value) { return redact(JSON.stringify(value), this.secrets); }
 
   close() { this.db.close(); }
 }

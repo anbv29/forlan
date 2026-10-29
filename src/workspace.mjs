@@ -10,22 +10,44 @@ export function commandEnv() {
 }
 
 export function command(executable, args, cwd, signal, timeout = 120000) {
+  signal?.throwIfAborted();
   return new Promise((resolveResult, reject) => {
-    const child = spawn(executable, args, { cwd, signal, shell: false,
+    const child = spawn(executable, args, { cwd, shell: false, detached: process.platform !== 'win32',
       windowsHide: true, env: commandEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
     let overflow = false;
-    const timer = setTimeout(() => child.kill(), timeout);
+    let timedOut = false;
+    const kill = () => {
+      if (!child.pid) return;
+      if (process.platform === 'win32') {
+        const killer = spawn(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'),
+          ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore', env: commandEnv() });
+        killer.on('error', () => child.kill());
+        killer.on('exit', code => { if (code !== 0) child.kill(); });
+      } else {
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+      }
+    };
+    const abort = () => kill();
+    signal?.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(() => { timedOut = true; kill(); }, timeout);
+    if (signal?.aborted) kill();
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    };
     const collect = data => {
       output += data.toString();
-      if (output.length > 200000) { overflow = true; output = output.slice(0, 200000); child.kill(); }
+      if (output.length > 200000) { overflow = true; output = output.slice(0, 200000); kill(); }
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
-    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('error', error => { cleanup(); reject(error); });
     child.on('close', (code, killedSignal) => {
-      clearTimeout(timer);
-      resolveResult({ code: code ?? -1, output, truncated: overflow, signal: killedSignal });
+      cleanup();
+      if (signal?.aborted) { reject(signal.reason); return; }
+      resolveResult({ code: timedOut || overflow ? -1 : code ?? -1, output,
+        truncated: overflow, timedOut, signal: killedSignal });
     });
   });
 }
@@ -50,7 +72,7 @@ export async function createWorktree(config, task, signal) {
 }
 
 export async function safePath(workspace, path, writing = false) {
-  if (typeof path !== 'string' || !path || isAbsolute(path)) throw new Error('Use a relative file path.');
+  if (typeof path !== 'string' || !path || path.includes(':') || isAbsolute(path)) throw new Error('Use a relative file path.');
   const parts = path.replaceAll('\\', '/').split('/');
   if (parts.some(p => p === '..' || p.toLowerCase() === '.git' || /^\.env($|\.)/i.test(p))) throw new Error('Restricted path.');
   const target = resolve(workspace, path);

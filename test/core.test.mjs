@@ -215,3 +215,52 @@ test('failed verification is persisted and provider errors omit response bodies'
     assert.ok(!JSON.stringify(failed).includes('private-provider-body'));
   } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
+
+test('persistent events and task records redact configured credentials', async () => {
+  const f = await fixture();
+  const store = new Store(join(f.directory, 'redacted-state'), ['private-test-key']);
+  try {
+    const task = store.create(f.repository, 'private-test-key');
+    store.event(task.id, 'usage', { provider: 'private-test-key' });
+    store.update(task.id, { summary: 'contains private-test-key' });
+    assert.ok(!JSON.stringify(store.get(task.id)).includes('private-test-key'));
+    assert.ok(!JSON.stringify(store.events(task.id)).includes('private-test-key'));
+    assert.match(store.get(task.id).summary, /REDACTED/);
+    await assert.rejects(safePath(f.repository, 'answer.txt:secret', true));
+  } finally {
+    store.close();
+    await f.remove();
+  }
+});
+
+test('subprocess deadlines stop execution and report a failed check', async () => {
+  const result = await command(process.execPath, ['-e', 'setInterval(()=>{},1000)'],
+    process.cwd(), undefined, 100);
+  assert.equal(result.code, -1);
+  assert.equal(result.timedOut, true);
+  const controller = new AbortController();
+  controller.abort();
+  assert.throws(() => command(process.execPath, ['--version'], process.cwd(), controller.signal));
+});
+
+test('model-step limit stops repeated tool calls and preserves a reviewable worktree', async () => {
+  const f = await fixture();
+  const provider = await mockProvider((_req, res) => reply(res, { tool_calls: [{
+    id: 'repeat', type: 'function', function: { name: 'list_files', arguments: '{}' }
+  }] }));
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1 });
+  try {
+    assert.throws(() => new Runtime(runtime.config), /Another server/);
+    const task = await runtime.start(f.repository, 'Repeat');
+    const result = await waitTask(runtime, task.id);
+    assert.equal(result.status, 'failed');
+    assert.match(result.error, /step limit/);
+    assert.ok(result.workspace);
+    assert.equal((await runtime.diff(task.id)).diff, '');
+  } finally {
+    await runtime.close();
+    await provider.close();
+    await f.remove();
+  }
+});
