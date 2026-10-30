@@ -1,0 +1,47 @@
+{
+  "daily": {
+    "name": "Daily repository review",
+    "repository": "C:/absolute/path/to/your/repository",
+    "goal": "Inspect recent committed changes and propose tests for concrete regressions.",
+    "agents": [
+      "byok"
+    ],
+    "trigger": {
+      "type": "daily",
+      "time": "09:00",
+      "timeZone": "Asia/Kolkata"
+    }
+  },
+  "interval": {
+    "name": "Hourly check",
+    "repository": "C:/absolute/path/to/your/repository",
+    "goal": "Inspect recent committed changes and propose tests for concrete regressions.",
+    "agents": [
+      "byok"
+    ],
+    "trigger": {
+      "type": "interval",
+      "everySeconds": 3600
+    }
+  },
+  "event": {
+    "name": "Repository event review",
+    "repository": "C:/absolute/path/to/your/repository",
+    "goal": "Inspect recent committed changes and propose tests for concrete regressions.",
+    "agents": [
+      "byok"
+    ],
+    "trigger": {
+      "type": "event",
+      "eventType": "repository.changed"
+    },
+    "includeEventPayload": false
+  },
+  "delivery": {
+    "eventId": "delivery-123",
+    "type": "repository.changed",
+    "payload": {
+      "branch": "main"
+    }
+  }
+}
