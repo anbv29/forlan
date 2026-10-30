@@ -1,3 +1,4 @@
+import { registerAutomationTools } from './automation-tools.mjs';
 import { beginIntegration } from './integration.mjs';
 import { resumeProject } from './scheduler.mjs';
 import { agentCatalog } from './agents.mjs';
@@ -29,7 +30,7 @@ export function createServer(config) {
 
   register('get_configuration', 'Inspect configured repositories, model and checks. Never returns API keys.',
     {}, () => ({ repositories: config.repositories, model: config.model,
-      checks: config.checks, maxSteps: config.maxSteps, maxConcurrent: config.maxConcurrent, requireApproval: config.requireApproval ?? false, agents: agentCatalog(config) }), true);
+      checks: config.checks, maxSteps: config.maxSteps, maxConcurrent: config.maxConcurrent, requireApproval: config.requireApproval ?? false, agents: agentCatalog(config), automations: runtime.automations.health() }), true);
 
   register('start_task', 'Start a BYOK coding task in a new Git worktree. Returns immediately. ' +
     'Sends repository files to the configured inference endpoint. Changes require human review.',
@@ -126,6 +127,8 @@ export function createServer(config) {
       if (response.action !== 'accept' || response.content?.approve !== true) return { id: taskId, status: project.status };
       return beginIntegration(runtime.projects, taskId);
     });
+
+  registerAutomationTools(register, server, runtime);
 
   let closePromise;
   const close = () => closePromise ??= runtime.close();

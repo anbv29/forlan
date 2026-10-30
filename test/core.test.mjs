@@ -159,7 +159,7 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
   };
   try {
     await connect();
-    assert.equal((await client.listTools()).tools.length, 15);
+    assert.equal((await client.listTools()).tools.length, 21);
     assert.equal((await invoke('get_configuration')).model, 'fixture-model');
     const task = await invoke('start_task', { repository: f.repository, goal: 'Update answer and add notes.' });
     let final;
@@ -853,4 +853,48 @@ test('automation storage reserves occurrences once and retains receipts across r
     assert.equal(db.runs(rule.id).length, 1);
     assert.ok(!JSON.stringify(db.runs(rule.id)).includes('fake-private-key'));
   } finally { store.close(); await f.remove(); }
+});
+
+test('scheduled and named-event automations create fixed-goal tasks once', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res, body) => {
+    calls++;
+    assert.ok(body.messages[1].content.includes('fixed-goal'));
+    assert.ok(!body.messages[1].content.includes('override-instructions'));
+    reply(res, { content: 'Automation completed.' });
+  });
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1, automationTickMs: 0 });
+  let now = Date.parse('2026-10-30T00:00:00Z');
+  const engine = runtime.automations;
+  engine.clock = () => now;
+  try {
+    const rule = await engine.create({ name: 'scheduled', repository: f.repository, goal: 'fixed-goal',
+      trigger: { type: 'interval', everySeconds: 60 } });
+    engine.tick();
+    assert.equal(engine.get(rule.id).runs.length, 0);
+    engine.enable(rule.id);
+    now += 60000;
+    engine.tick();
+    const first = engine.get(rule.id).runs[0];
+    const firstTask = engine.store.run(first.id).taskId;
+    assert.equal((await waitTask(runtime, firstTask)).status, 'needs_review');
+    engine.tick();
+    assert.equal(engine.get(rule.id).runs.length, 1);
+    assert.equal(calls, 1);
+    engine.disable(rule.id);
+    const eventRule = await engine.create({ name: 'event', repository: f.repository, goal: 'fixed-goal',
+      trigger: { type: 'event', eventType: 'build.changed' } });
+    engine.enable(eventRule.id);
+    const event = { id: 'delivery-1', type: 'build.changed', payload: { instruction: 'override-instructions' } };
+    const receipt = engine.event(event);
+    const eventTask = engine.store.run(receipt.runs[0].id).taskId;
+    assert.equal((await waitTask(runtime, eventTask)).status, 'needs_review');
+    assert.equal(engine.event(event).duplicate, true);
+    assert.throws(() => engine.event({ ...event, payload: { different: true } }), /different content/);
+    assert.equal(calls, 2);
+    engine.disable(eventRule.id);
+    assert.equal(engine.event({ ...event, id: 'delivery-2' }).runs.length, 0);
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
