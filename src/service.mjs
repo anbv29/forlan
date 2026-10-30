@@ -60,7 +60,8 @@ export async function startService(config, { token, port = 8788 } = {}) {
         const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: randomUUID,
           onsessioninitialized: id => sessions.set(id, { app, transport }) });
         await app.server.connect(transport);
-        transport.onclose = () => { sessions.delete(transport.sessionId); };
+        const closed = transport.onclose;
+        transport.onclose = () => { sessions.delete(transport.sessionId); closed?.(); };
         session = { app, transport };
       }
       if (!session) { respond(res, 404, { error: 'Initialize a new MCP session.' }); return; }
