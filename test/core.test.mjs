@@ -828,3 +828,29 @@ test('automation schedules handle intervals timezone dates and daylight-saving r
   assert.throws(() => normalizeTrigger({ type: 'unknown' }, now));
   assert.throws(() => normalizeTrigger(null, now));
 });
+
+test('automation storage reserves occurrences once and retains receipts across restart', async () => {
+  const { AutomationStore } = await import('../src/automation-store.mjs');
+  const f = await fixture();
+  let store = new Store(join(f.directory, 'automation-state'), ['fake-private-key']);
+  try {
+    let db = new AutomationStore(store);
+    const rule = db.create({ name: 'test', goal: 'fake-private-key', repository: f.repository });
+    assert.equal(rule.enabled, false);
+    assert.ok(!rule.goal.includes('fake-private-key'));
+    const first = db.reserve(rule.id, 'occurrence-1', { payload: { secret: 'fake-private-key' } });
+    assert.equal(db.reserve(rule.id, 'occurrence-1').id, first.id);
+    assert.equal(db.queuedCount(), 1);
+    db.recordEvent('event-1', 'digest');
+    db.disable(rule.id);
+    assert.equal(db.run(first.id).status, 'cancelled');
+    assert.equal(db.queuedCount(), 0);
+    store.close();
+    store = new Store(join(f.directory, 'automation-state'));
+    db = new AutomationStore(store);
+    assert.equal(db.eventDigest('event-1'), 'digest');
+    assert.equal(db.reserve(rule.id, 'occurrence-1').id, first.id);
+    assert.equal(db.runs(rule.id).length, 1);
+    assert.ok(!JSON.stringify(db.runs(rule.id)).includes('fake-private-key'));
+  } finally { store.close(); await f.remove(); }
+});
