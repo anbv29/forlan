@@ -27,9 +27,22 @@ export async function resumeTask(runtime, id) {
     const parent = runtime.store.get(task.projectId);
     if (!['paused_project', 'blocked'].includes(parent.status)) throw new Error('Pause the parent project before recovering its child.');
   }
-  const queued = runtime.store.update(id, { status: 'queued', error: null,
-    approvedStage: null, checkpoint: null, recoveryCount: (task.recoveryCount ?? 0) + 1,
-    resumedAt: new Date().toISOString() });
+  if (task.automationId) {
+    const runs = runtime.automations.store;
+    const receipt = runs.run(task.automationRunId);
+    if (receipt.taskId !== id || receipt.automationId !== task.automationId) throw new Error('Automation receipt changed.');
+    if (runs.active(task.automationId).some(run => run.taskId !== id && (run.status === 'queued' ||
+      ['queued', 'running', 'awaiting_approval'].includes(runtime.store.get(run.taskId).status)))) {
+      throw new Error('Another run of this automation is still pending.');
+    }
+  }
+  const queued = runtime.store.transaction(() => {
+    const updated = runtime.store.update(id, { status: 'queued', error: null,
+      approvedStage: null, checkpoint: null, recoveryCount: (task.recoveryCount ?? 0) + 1,
+      resumedAt: new Date().toISOString() });
+    if (task.automationRunId) runtime.automations.store.updateRun(task.automationRunId, { status: 'started', finishedAt: null });
+    return updated;
+  });
   runtime.store.event(id, 'recovery_requested', { stageIndex: task.stageIndex, preservesWorktree: !!task.workspace });
   runtime.launch(queued);
   return queued;
@@ -45,7 +58,8 @@ export function registerRecoveryTools(register, server, runtime, z) {
       if (!server.server.getClientCapabilities()?.elicitation) throw new Error('MCP form elicitation is required.');
       const response = await server.server.elicitInput({ mode: 'form',
         message: 'Continue interrupted task ' + task.goal + ' at ' + (task.kind === 'project' ? task.phase : 'stage ' + (task.stageIndex + 1)) +
-          '? Existing edits and completed stages are preserved. The unfinished stage uses a fresh model call. ' +
+          '? Existing edits and completed stages are preserved. Integration and resolution use fresh candidates. ' +
+          'Unfinished agent stages use fresh model calls. Configured checks run again when needed. ' +
           'Review existing changes first; external actions may repeat.',
         requestedSchema: { type: 'object', properties: {
           approve: { type: 'boolean', title: 'Continue interrupted work', default: false }
