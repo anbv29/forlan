@@ -12,8 +12,8 @@ import { pathToFileURL } from 'node:url';
 import { loadConfig, safeError } from './core.mjs';
 import { Runtime } from './runtime.mjs';
 
-export function createServer(config) {
-  const runtime = new Runtime(config);
+export function createServer(config, options = {}) {
+  const runtime = options.runtime ?? new Runtime(config);
   const server = new McpServer({ name: 'byok-agent-mcp', version: '0.1.0' });
   const id = { taskId: z.string().uuid() };
   const register = (name, description, inputSchema, handler, readOnlyHint = false) => {
@@ -155,7 +155,7 @@ export function createServer(config) {
 
   let closePromise;
   const close = () => closePromise ??= runtime.close();
-  server.onclose = () => { void close(); };
+  server.onclose = () => { if (!options.runtime) void close(); };
   return { server, runtime, close };
 }
 
