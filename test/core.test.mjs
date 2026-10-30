@@ -988,3 +988,117 @@ test('webhook configuration requires a strong environment token and a valid port
   assert.equal(config.port, 0);
   assert.equal(config.token, token);
 });
+
+async function seedConflictProject(runtime, repository) {
+  const { createWorktree } = await import('../src/workspace.mjs');
+  const project = runtime.store.create(repository, 'Resolve combined feature changes');
+  const workspace = await createWorktree(runtime.config, { ...project, repository });
+  const nodes = [];
+  for (const side of ['left', 'right']) {
+    const child = runtime.store.create(repository, side);
+    const childWorkspace = await createWorktree(runtime.config, { ...child, repository });
+    await writeFile(join(childWorkspace.workspace, 'answer.txt'), side);
+    runtime.store.update(child.id, { ...childWorkspace, status: 'needs_review' });
+    nodes.push({ key: side, taskId: child.id, dependsOn: [] });
+  }
+  return runtime.store.update(project.id, { ...workspace, kind: 'project', phase: 'execution',
+    status: 'needs_review', nodes });
+}
+
+test('overlapping conflict resolution needs human approval and produces a verified review candidate', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const { ElicitRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
+  const { createServer: makeServer } = await import('../src/server.mjs');
+  const { beginIntegration } = await import('../src/integration.mjs');
+  const f = await fixture();
+  let calls = 0;
+  const call = (name, args) => ({ id: 'call-' + calls, type: 'function', function: { name, arguments: JSON.stringify(args) } });
+  const provider = await mockProvider((_req, res, body) => {
+    calls++;
+    assert.ok(body.messages[1].content.includes('Conflict versions'));
+    if (calls === 1) reply(res, { tool_calls: [call('write_file', { path: 'unapproved.txt', content: 'not allowed' })] });
+    else if (calls === 2) {
+      assert.match(body.messages.at(-1).content, /approved conflict set/);
+      reply(res, { tool_calls: [call('read_file', { path: 'answer.txt' })] });
+    } else if (calls === 3) {
+      assert.match(body.messages.at(-1).content, /BYOK_OURS/);
+      reply(res, { tool_calls: [call('write_file', { path: 'answer.txt', content: 'resolved both intents' })] });
+    } else reply(res, { content: 'Resolved both task versions; review the combined intent.' });
+  });
+  const app = makeServer({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', maxSteps: 4, maxConcurrent: 1, automationTickMs: 0,
+    checks: [[process.execPath, '-e', "if(require('fs').readFileSync('answer.txt','utf8')!=='resolved both intents')process.exit(1)"]] });
+  const client = new Client({ name: 'resolver-client', version: '1' }, { capabilities: { elicitation: { form: {} } } });
+  let approve = false;
+  client.setRequestHandler(ElicitRequestSchema, async () => ({ action: 'accept', content: { approve } }));
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([app.server.connect(left), client.connect(right)]);
+    const project = await seedConflictProject(app.runtime, f.repository);
+    beginIntegration(app.runtime.projects, project.id);
+    assert.equal((await waitTask(app.runtime, project.id)).status, 'integration_conflict');
+    const args = { name: 'resolve_project_conflicts', arguments: { taskId: project.id } };
+    await client.callTool(args);
+    assert.equal(calls, 0);
+    approve = true;
+    const result = await client.callTool(args);
+    assert.ok(!result.isError, JSON.stringify(result));
+    const resolved = await waitTask(app.runtime, project.id);
+    assert.equal(resolved.status, 'needs_review', JSON.stringify(resolved));
+    assert.equal(resolved.checks.passed, true);
+    assert.equal(resolved.conflictResolution.status, 'proposed_for_review');
+    assert.equal(await readFile(join(resolved.workspace, 'answer.txt'), 'utf8'), 'resolved both intents');
+    await assert.rejects(readFile(join(resolved.workspace, 'unapproved.txt')));
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
+  } finally { await client.close(); await app.close(); await provider.close(); await f.remove(); }
+});
+
+test('automation coalesces missed schedules prevents overlap and preserves interrupted-run history', async () => {
+  const f = await fixture();
+  let calls = 0, arrived, release;
+  const started = new Promise(resolve => { arrived = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const provider = await mockProvider(async (_req, res) => {
+    calls++; arrived(); await gate; reply(res, { content: 'Scheduled run finished.' });
+  });
+  const config = { repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1, automationTickMs: 0 };
+  let runtime = new Runtime(config);
+  let now = Date.parse('2026-10-30T00:00:00Z');
+  try {
+    runtime.automations.clock = () => now;
+    const rule = await runtime.automations.create({ name: 'No overlap', repository: f.repository, goal: 'Fixed task',
+      trigger: { type: 'interval', everySeconds: 60 } });
+    runtime.automations.enable(rule.id);
+    now += 60000;
+    runtime.automations.tick();
+    await started;
+    now += 600000;
+    runtime.automations.tick();
+    let runs = runtime.automations.get(rule.id).runs;
+    assert.equal(runs.length, 2);
+    assert.equal(runs[0].status, 'skipped');
+    assert.equal(calls, 1);
+    runtime.automations.disable(rule.id);
+    assert.equal(runtime.active.size, 1);
+    release();
+    const active = runs.find(run => run.taskId);
+    assert.equal((await waitTask(runtime, active.taskId)).status, 'needs_review');
+    runtime.automations.tick();
+    const reserved = runtime.automations.store.reserve(rule.id, 'crash-window');
+    const interrupted = runtime.store.create(f.repository, 'Do not rerun');
+    runtime.store.update(interrupted.id, { automationId: rule.id });
+    runtime.automations.store.updateRun(reserved.id, { status: 'started', taskId: interrupted.id });
+    await runtime.close();
+    runtime = new Runtime(config);
+    runtime.automations.clock = () => now;
+    runtime.automations.tick();
+    assert.equal(runtime.automations.store.run(reserved.id).status, 'interrupted');
+    assert.equal(runtime.store.get(interrupted.id).status, 'interrupted');
+    assert.equal(runtime.active.size, 0);
+    assert.equal(calls, 1);
+    runs = runtime.automations.get(rule.id).runs;
+    assert.equal(runs.length, 3);
+  } finally { release(); await runtime.close(); await provider.close(); await f.remove(); }
+});
