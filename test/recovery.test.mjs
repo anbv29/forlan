@@ -4,6 +4,55 @@ import { mkdtemp, mkdir, rm, realpath } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { Store } from '../src/core.mjs';
 import { resumeTask } from '../src/recovery.mjs';
+import { Runtime } from '../src/runtime.mjs';
+import { createWorktree } from '../src/workspace.mjs';
+import { writeFile, readFile } from 'node:fs/promises';
+import { repositoryFixture, mockInference, settled } from './helpers.mjs';
+
+test('interrupted pipeline continues in the existing worktree without rerunning its finished stage', async t => {
+  const f = await repositoryFixture();
+  let runtime = new Runtime(f.config);
+  try {
+    const created = runtime.store.create(f.repository, 'Finish pending edits');
+    const branch = await createWorktree(f.config, created);
+    await writeFile(join(branch.workspace, 'answer.txt'), 'Saved edit');
+    runtime.store.update(created.id, { ...branch, status: 'running', stageIndex: 1,
+      stages: [{ agent: 'byok' }, { agent: 'byok' }], stageResults: [{ agent: 'byok', summary: 'First stage finished' }] });
+    await runtime.close();
+    runtime = new Runtime(f.config);
+    assert.equal(runtime.store.get(created.id).status, 'interrupted');
+    let calls = 0;
+    mockInference(t, body => {
+      calls++;
+      assert.match(body.messages[1].content, /Saved edit/);
+      assert.match(body.messages[1].content, /First stage finished/);
+      assert.match(body.messages[1].content, /was interrupted/);
+      return { content: 'Continued the unfinished stage.' };
+    });
+    await resumeTask(runtime, created.id);
+    const completed = await settled(runtime, created.id);
+    assert.equal(completed.status, 'needs_review', completed.error);
+    assert.equal(completed.workspace, branch.workspace);
+    assert.equal(completed.stageResults.length, 2);
+    assert.equal(completed.stageIndex, 2);
+    assert.equal(calls, 1);
+    assert.equal(await readFile(join(branch.workspace, 'answer.txt'), 'utf8'), 'Saved edit');
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'Original answer\n');
+  } finally { await runtime.close(); await f.remove(); }
+});
+
+test('recovery refuses missing worktrees before launching a model', async () => {
+  const f = await repositoryFixture();
+  const runtime = new Runtime(f.config);
+  try {
+    const task = runtime.store.create(f.repository, 'Continue');
+    runtime.store.update(task.id, { status: 'interrupted', stages: [{ agent: 'byok' }],
+      stageIndex: 0, workspace: join(f.directory, 'missing') });
+    await assert.rejects(resumeTask(runtime, task.id), /ENOENT/);
+    assert.equal(runtime.active.size, 0);
+    assert.equal(runtime.store.get(task.id).status, 'interrupted');
+  } finally { await runtime.close(); await f.remove(); }
+});
 
 test('recovery preserves completed stages and requires a fresh stage approval', async () => {
   const directory = await mkdtemp(resolve('work/recovery-'));
