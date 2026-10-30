@@ -1,5 +1,6 @@
 import { beginResolution } from './resolution.mjs';
 import { registerContextTools } from './context-tools.mjs';
+import { registerRecoveryTools } from './recovery.mjs';
 import { registerAutomationTools } from './automation-tools.mjs';
 import { beginIntegration } from './integration.mjs';
 import { resumeProject } from './scheduler.mjs';
@@ -150,6 +151,7 @@ export function createServer(config) {
 
   registerAutomationTools(register, server, runtime);
   registerContextTools(register, runtime);
+  registerRecoveryTools(register, server, runtime, z);
 
   let closePromise;
   const close = () => closePromise ??= runtime.close();

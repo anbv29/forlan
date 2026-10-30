@@ -30,7 +30,7 @@ export async function executePipeline(runtime, task, signal) {
     store.update(task.id, runtime.clean({ checks,
       status: checks.configured && !checks.passed ? 'checks_failed' : 'needs_review' }));
   } catch (error) {
-    store.update(task.id, { status: signal.aborted ? 'cancelled' : 'failed',
+    store.update(task.id, { status: runtime.closing ? 'interrupted' : signal.aborted ? 'cancelled' : 'failed',
       error: safeError(error, config) });
   }
 }

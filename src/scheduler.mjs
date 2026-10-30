@@ -46,9 +46,13 @@ export function pumpProjects(projects) {
 export function resumeProject(projects, id) {
   const r = projects.runtime;
   const project = r.store.get(id);
-  if (r.closing || project.kind !== 'project' || project.status !== 'paused_project') throw new Error('Project cannot be resumed.');
+  if (r.closing || project.kind !== 'project' || !['paused_project', 'blocked'].includes(project.status)) throw new Error('Project cannot be resumed.');
   const children = project.nodes.map(node => r.store.get(node.taskId));
-  if (children.some(task => task.status === 'interrupted')) throw new Error('An active child was interrupted; inspect its worktree and create a new plan.');
+  if (children.some(task => task.status === 'interrupted')) throw new Error('Recover interrupted children with resume_task first.');
+  if (children.some(task => ['failed', 'checks_failed', 'cancelled'].includes(task.status))) throw new Error('A dependency failed or was cancelled.');
+  for (const task of children.filter(task => task.status === 'blocked')) {
+    r.store.update(task.id, { status: 'waiting_dependency', error: null });
+  }
   r.store.update(id, { status: 'orchestrating' });
   projects.pump();
   return r.store.get(id);
