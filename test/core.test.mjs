@@ -1102,3 +1102,103 @@ test('automation coalesces missed schedules prevents overlap and preserves inter
     assert.equal(runs.length, 3);
   } finally { release(); await runtime.close(); await provider.close(); await f.remove(); }
 });
+
+test('resolver cannot claim success while conflict markers remain', async () => {
+  const { beginIntegration } = await import('../src/integration.mjs');
+  const { beginResolution } = await import('../src/resolution.mjs');
+  const f = await fixture();
+  const provider = await mockProvider((_req, res) => reply(res, { content: 'Claimed resolution without editing.' }));
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1, automationTickMs: 0 });
+  try {
+    const project = await seedConflictProject(runtime, f.repository);
+    beginIntegration(runtime.projects, project.id);
+    assert.equal((await waitTask(runtime, project.id)).status, 'integration_conflict');
+    beginResolution(runtime.projects, project.id);
+    const failed = await waitTask(runtime, project.id);
+    assert.equal(failed.status, 'failed');
+    assert.match(failed.error, /conflict markers/);
+    assert.match(await readFile(join(failed.workspace, 'answer.txt'), 'utf8'), /BYOK_OURS/);
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
+});
+
+test('internal task events trigger approved rules without self-triggering automation loops', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res, body) => {
+    calls++;
+    if (calls === 2) assert.match(body.messages[1].content, /Event payload \(untrusted data/);
+    reply(res, { content: 'Task ready.' });
+  });
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1, automationTickMs: 0 });
+  try {
+    const rule = await runtime.automations.create({ name: 'Follow-up', repository: f.repository,
+      goal: 'Review the task result', includeEventPayload: true,
+      trigger: { type: 'event', eventType: 'task.ready_for_review' } });
+    runtime.automations.enable(rule.id);
+    const source = await runtime.start(f.repository, 'Source task');
+    await waitTask(runtime, source.id);
+    let run;
+    for (let i = 0; i < 100; i++) {
+      run = runtime.automations.get(rule.id).runs[0];
+      if (run?.taskId) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.ok(run?.taskId);
+    assert.equal((await waitTask(runtime, run.taskId)).status, 'needs_review');
+    runtime.automations.tick();
+    assert.equal(runtime.automations.get(rule.id).runs.length, 1);
+    assert.equal(calls, 2);
+    assert.equal(runtime.active.size, 0);
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
+});
+
+test('background automation polling fires an approved one-off schedule once', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res) => { calls++; reply(res, { content: 'One-off completed.' }); });
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1, automationTickMs: 20 });
+  let now = Date.parse('2026-10-30T00:00:00Z');
+  try {
+    runtime.automations.clock = () => now;
+    const rule = await runtime.automations.create({ name: 'Once', repository: f.repository, goal: 'Run once',
+      trigger: { type: 'once', at: '2026-10-30T00:01:00Z' } });
+    runtime.automations.enable(rule.id);
+    now += 60000;
+    let run;
+    for (let i = 0; i < 200; i++) {
+      run = runtime.automations.get(rule.id).runs[0];
+      if (run?.taskId) break;
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.ok(run?.taskId);
+    assert.equal((await waitTask(runtime, run.taskId)).status, 'needs_review');
+    now += 600000;
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.equal(calls, 1);
+    assert.equal(runtime.automations.get(rule.id).runs.length, 1);
+    assert.equal(runtime.automations.store.get(rule.id).nextAt, null);
+    assert.equal(runtime.automations.health().error, null);
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
+});
+
+test('automation boundaries reject unconfigured targets malformed events and oversized payloads', async () => {
+  const f = await fixture();
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    checks: [], maxSteps: 1, maxConcurrent: 1, automationTickMs: 0 });
+  const base = { name: 'Boundary', repository: f.repository, goal: 'Fixed',
+    trigger: { type: 'event', eventType: 'valid.event' } };
+  try {
+    await assert.rejects(runtime.automations.create({ ...base, repository: f.directory }), /configured/);
+    await assert.rejects(runtime.automations.create({ ...base, agents: ['unknown'] }), /configured/);
+    await assert.rejects(runtime.automations.create({ ...base, includeEventPayload: 'yes' }), /boolean/);
+    assert.throws(() => runtime.automations.event({ id: '../bad', type: 'valid.event' }), /event id/);
+    assert.throws(() => runtime.automations.event({ id: 'large', type: 'valid.event',
+      payload: { text: 'x'.repeat(9000) } }), /8 KB/);
+    assert.equal(runtime.automations.list().length, 0);
+    assert.equal(runtime.automations.health().queuedRuns, 0);
+  } finally { await runtime.close(); await f.remove(); }
+});

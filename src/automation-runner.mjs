@@ -71,5 +71,5 @@ export function emitTaskEvent(engine, task) {
     'project.integrated' : 'task.ready_for_review';
   if (['failed', 'checks_failed', 'integration_conflict'].includes(task.status)) type = 'task.failed';
   if (type) engine.event({ id: task.id + ':' + type, type, repository: task.repository,
-    payload: { taskId: task.id, status: task.status, summary: (task.summary ?? '').slice(0, 4000) } });
+    payload: { taskId: task.id, status: task.status, summary: (task.summary ?? '').slice(0, 1000) } });
 }
