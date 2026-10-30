@@ -5,8 +5,9 @@ import { stagePlan } from './agents.mjs';
 
 export async function resumeTask(runtime, id) {
   const task = runtime.store.get(id);
-  if (runtime.closing || runtime.active.has(id) || task.status !== 'interrupted' || task.kind === 'project') {
-    throw new Error('Only a stopped interrupted agent task can be resumed.');
+  if (runtime.closing || runtime.active.has(id) || task.status !== 'interrupted' ||
+    (task.kind === 'project' && !['planning', 'integration', 'resolution'].includes(task.phase))) {
+    throw new Error('Only a stopped interrupted task or project operation can be resumed.');
   }
   if (runtime.active.size >= runtime.config.maxConcurrent) throw new Error('Concurrent task limit reached.');
   const repository = await realpath(task.repository);
@@ -40,10 +41,10 @@ export function registerRecoveryTools(register, server, runtime, z) {
     'external side effects may repeat. No automatic replay occurs.',
     { taskId: z.string().uuid() }, async ({ taskId }) => {
       const task = runtime.store.get(taskId);
-      if (task.status !== 'interrupted' || task.kind === 'project') throw new Error('Task is not recoverable.');
+      if (task.status !== 'interrupted') throw new Error('Task is not recoverable.');
       if (!server.server.getClientCapabilities()?.elicitation) throw new Error('MCP form elicitation is required.');
       const response = await server.server.elicitInput({ mode: 'form',
-        message: 'Continue interrupted task ' + task.goal + ' at stage ' + (task.stageIndex + 1) +
+        message: 'Continue interrupted task ' + task.goal + ' at ' + (task.kind === 'project' ? task.phase : 'stage ' + (task.stageIndex + 1)) +
           '? Existing edits and completed stages are preserved. The unfinished stage uses a fresh model call. ' +
           'Review existing changes first; external actions may repeat.',
         requestedSchema: { type: 'object', properties: {

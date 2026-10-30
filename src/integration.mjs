@@ -1,7 +1,8 @@
 import { mergeSnapshots } from './merge.mjs';
 import { captureChanges, applyChanges } from './plans.mjs';
-import { diffWorkspace, checksWorkspace } from './workspace.mjs';
+import { diffWorkspace, checksWorkspace, createWorktree } from './workspace.mjs';
 import { safeError } from './core.mjs';
+import { randomUUID } from 'node:crypto';
 
 export function beginIntegration(projects, id) {
   const r = projects.runtime;
@@ -31,14 +32,17 @@ export async function integrateProject(projects, project, signal) {
     }
     const { files, resolvedFiles } = await mergeSnapshots(r.config, project, snapshots, signal);
     signal.throwIfAborted();
+    const candidate = await createWorktree(r.config, { id: randomUUID(), repository: project.repository, baseRef: project.base }, signal);
+    r.store.update(project.id, { integrationCandidate: candidate });
+    project = { ...project, ...candidate };
     await applyChanges(project.workspace, files, signal);
     const checks = await checksWorkspace(r.config, project.workspace, signal);
     signal.throwIfAborted();
-    r.store.update(project.id, r.clean({ phase: 'integrated', checks, autoMergedFiles: resolvedFiles, integratedFiles: Object.keys(files),
+    r.store.update(project.id, r.clean({ ...candidate, phase: 'integrated', checks, autoMergedFiles: resolvedFiles, integratedFiles: Object.keys(files),
       status: checks.configured && !checks.passed ? 'checks_failed' : 'needs_review' }));
     r.store.event(project.id, 'integration_completed', { files: Object.keys(files).length });
   } catch (error) {
-    r.store.update(project.id, { status: signal.aborted ? 'cancelled' :
+    r.store.update(project.id, { status: r.closing ? 'interrupted' : signal.aborted ? 'cancelled' :
       (error.message?.startsWith('Dependency conflict') ? 'integration_conflict' : 'failed'),
       error: safeError(error, r.config), mergeConflicts: error.conflicts ?? [] });
   }

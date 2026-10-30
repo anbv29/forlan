@@ -28,7 +28,7 @@ export class Projects {
     const r = this.runtime;
     try {
       r.store.update(project.id, { status: 'running' });
-      project = r.store.update(project.id, await createWorktree(r.config, project, signal));
+      if (!project.workspace) project = r.store.update(project.id, await createWorktree(r.config, project, signal));
       const name = project.stages[0].agent;
       const profile = r.config.agents?.[name] ?? { kind: 'byok' };
       const config = { ...r.config, agents: { ...r.config.agents, [name]: { ...profile, readOnly: true } } };
@@ -42,7 +42,7 @@ export class Projects {
       r.store.update(project.id, r.clean({ status: 'awaiting_plan_approval', phase: 'planned', nodes: plan.nodes }));
       r.store.event(project.id, 'plan_created', { nodes: plan.nodes.length });
     } catch (error) {
-      r.store.update(project.id, { status: signal.aborted ? 'cancelled' : 'failed', error: safeError(error, r.config) });
+      r.store.update(project.id, { status: r.closing ? 'interrupted' : signal.aborted ? 'cancelled' : 'failed', error: safeError(error, r.config) });
     }
   }
 

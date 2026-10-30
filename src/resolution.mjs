@@ -88,7 +88,7 @@ export async function resolveProject(projects, project, signal) {
       conflictResolution: { agent: decisions ? 'human' : project.resolverAgent, files: paths, status: 'proposed_for_review' },
       status: checks.configured && !checks.passed ? 'checks_failed' : 'needs_review' }));
   } catch (error) {
-    r.store.update(original.id, { status: signal.aborted ? 'cancelled' : 'integration_conflict',
+    r.store.update(original.id, { status: r.closing ? 'interrupted' : signal.aborted ? 'cancelled' : 'integration_conflict',
       failedResolutionCandidate: candidate ?? null, error: safeError(error, r.config) });
   }
 }
