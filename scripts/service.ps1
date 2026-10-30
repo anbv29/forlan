@@ -2,18 +2,22 @@ param(
     [ValidateSet('Install', 'Start', 'Stop', 'Status', 'Uninstall')]
     [string]$Action = 'Status',
     [string]$ConfigPath,
+    [ValidatePattern('^[a-zA-Z0-9 _]{1,80}$')]
     [string]$TaskName = 'BYOK Agent MCP'
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 if ($Action -eq 'Install') {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+        throw 'That scheduled task already exists. Uninstall it before replacing it.'
+    }
     if (-not $ConfigPath) { throw 'Supply an absolute configuration path.' }
     $configFile = (Resolve-Path -LiteralPath $ConfigPath).Path
     if ($configFile.Contains('"') -or $projectRoot.Contains('"')) { throw 'Paths cannot contain quotes.' }
     $nodePath = (Get-Command node -CommandType Application).Source
     $serviceEntry = Join-Path $projectRoot 'src/service.mjs'
-    $launcher = Join-Path $projectRoot 'work/start-service.ps1'
+    $launcher = Join-Path $projectRoot ('work/start-service-' + $TaskName + '.ps1')
     New-Item -ItemType Directory -Path (Split-Path -Parent $launcher) -Force | Out-Null
     $escapedConfig = $configFile.Replace("'", "''")
     $escapedNode = $nodePath.Replace("'", "''")
@@ -33,9 +37,6 @@ exit `$LASTEXITCODE
         -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -MultipleInstances IgnoreNew -StartWhenAvailable
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        throw 'That scheduled task already exists. Uninstall it before replacing it.'
-    }
     Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
         -Settings $settings -Principal $principal -Description 'Local BYOK MCP background worker' | Out-Null
     Write-Output 'Installed. Set persistent provider and service token environment variables, then start the task.'

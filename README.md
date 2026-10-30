@@ -5,7 +5,7 @@ Independent implementation inspired by the Alan report; no Alan binaries or serv
 
 ## Setup
 
-Requires Node.js 24+, Git, a committed repository and a stdio-capable MCP client.
+Requires Node.js 24+, Git, a committed repository and a compatible MCP client.
 
 1. Run npm ci.
 2. Copy config.example.json to config.local.json.
@@ -19,7 +19,8 @@ Keep API keys in client-managed secrets or inherited environment variables.
 Do not paste keys into chat, task goals or tool arguments.
 The server does not load .env files. Consumer chat subscriptions do not supply API credits.
 Local unauthenticated models can use loopback HTTP; remote endpoints require HTTPS.
-Hosted clients requiring remote MCP cannot directly use this stdio build.
+The optional background service exposes authenticated loopback Streamable HTTP MCP.
+Hosted clients cannot reach this local endpoint without a separately managed relay.
 
 Example client configuration; adapt the surrounding structure to your client:
 
@@ -69,8 +70,8 @@ or final integration are reading their changes.
 Failures block dependent nodes while independent work can finish. Cancellation of
 a project stops active children and cancels queued children. Restart pauses approved
 project queues as paused_project. Use resume_project explicitly to continue waiting
-work; interrupted active children are never silently rerun. Inspect their worktrees
-and create a new plan when an interrupted child prevents safe continuation.
+work; interrupted active children are never silently rerun. Recover each interrupted
+child through resume_task, then resume_project to release waiting descendants.
 
 Suggested flow: plan_project, inspect status, review_project_plan, approve child
 checkpoints, inspect all child diffs, integrate_project, inspect the combined diff.
@@ -157,7 +158,8 @@ BYOK writes are limited to conflict paths; native CLI agents use their own contr
 The server audits unrelated changes, rejects remaining conflict markers and reruns
 configured checks. The result is a candidate for human review, never an automatic
 commit or push. Passing checks do not prove that an agent understood both intentions.
-Add/delete decisions, oversized conflicts and unsupported binary files remain manual.
+Add/delete decisions use the explicit conflict review tools below. Oversized conflicts
+and unsupported binary files still require external resolution.
 A failed resolver can leave its candidate in the project worktree for inspection.
 
 ## Scheduled and event-triggered automations
@@ -187,8 +189,8 @@ also affects manual tasks. Enabling a definition never silently changes this pol
 disable_automation stops future triggers and cancels undispatched jobs; an already
 started task must be stopped using cancel_task when desired.
 
-The server must remain running. These are local background jobs, not an OS service
-or cloud worker. Enabled future schedules survive restart. Interrupted runs are
+The worker must remain running, either through stdio or the background service below.
+These are local jobs, not cloud execution. Enabled future schedules survive restart. Interrupted runs are
 recorded as interrupted and never replayed automatically. Disabling a rule does
 not delete its audit history. Rule, event and run records persist in SQLite.
 
@@ -222,8 +224,9 @@ On Windows prefer node with explicit script paths; .cmd wrappers are not interpr
 Project dependencies must already be available in the worktree.
 Checks run after model completion. Unconfigured checks never count as passed.
 Paused tasks use awaiting_approval. Terminal states include needs_review, checks_failed, failed and cancelled.
-Closing the client cancels active operations; pending checkpoints remain paused. The server must remain running.
-Restart marks unfinished records interrupted without resuming them.
+Closing a stdio client interrupts active operations; pending checkpoints remain paused.
+Background service clients can disconnect while the worker continues.
+Restart marks unfinished records interrupted without automatically resuming them.
 Worktrees, branches and SQLite history remain for inspection; cleanup is manual.
 
 ## Boundaries
@@ -238,14 +241,115 @@ Other secret-bearing files are not automatically detected.
 Provider keys are redacted from task records and omitted from server-owned check environments.
 Native CLI agents receive their selected credentials and use their own permission controls.
 Usage is recorded when provided. Limits do not guarantee a monetary budget.
-Direct Anthropic API integration, cloud hosting, service-specific event adapters and shared team memory are future work.
+Direct Anthropic API integration, cloud hosting, service-specific event adapters and multiuser permissions are future work.
+
+## Searchable code and project notes
+
+Call index_repository with a configured repository path to refresh its local SQLite
+full-text index. It covers the first 2000 tracked or unignored files, at most 10 MB,
+with the same file restrictions as the agent reader. Unsupported files are reported
+as skipped. The result includes an indexing timestamp and content fingerprint.
+Indexing is explicit; refresh after repository changes. Unsaved worktree edits are
+not automatically added to the original repository index.
+
+search_context takes repository and query and returns source paths with excerpts.
+remember_context saves a title and body for a repository decision or note; it returns
+a memory ID for forget_context. Notes survive code reindexing and server restarts.
+Agents automatically receive matching excerpts as untrusted context and are told
+to check current files. Notes are local to this installation, with no team accounts.
+Known configured credentials are redacted, but arbitrary secrets are not detected.
+
+## Recovery and conflict review
+
+resume_task asks the human before continuing an interrupted agent task. Completed
+stages and worktree edits survive. The unfinished stage starts a fresh call with
+the existing diff and earlier summaries. This does not restore a provider's internal
+session or guarantee exactly-once external actions. Normal stage checkpoints apply.
+Changed worktree HEADs, missing worktrees and removed repositories prevent recovery.
+Cancelled tasks are not resumed. Interrupted planning, integration and conflict
+resolution operations also support resume_task. Planning reuses its original worktree;
+integration and resolution start fresh candidate worktrees and retain earlier attempts.
+Recover interrupted project children before using resume_project for their parent queue.
+Integration updates the project's reported workspace to the completed candidate;
+always read current status before using its workspace path.
+
+get_conflict_details returns base and competing versions plus a revision hash.
+submit_conflict_resolutions takes taskId, revision and decisions, a map from each
+conflicting path to complete text or null for deletion. Every conflicting path must
+be covered. A human approval form shows the decisions before they are applied.
+Changed inputs invalidate the revision. Add/add and delete/modify conflicts can
+be settled this way without inference. Binary files remain unsupported.
+
+Agent-assisted resolutions and explicit decisions run in a separate candidate
+worktree. Failed attempts leave the original review worktree clean and retain the
+failedResolutionCandidate path for inspection. Successful candidates run configured
+checks and remain available for review. Unconfigured checks never imply success.
+
+## Background worker
+
+Set BYOK_CONFIG to an absolute config path and BYOK_SERVICE_TOKEN to a random secret
+of at least 32 characters, then run node src/service.mjs. The optional
+BYOK_SERVICE_PORT defaults to 8788. Connect a Streamable HTTP MCP client to
+http://127.0.0.1:8788/mcp with Authorization: Bearer followed by the token.
+Clients share one runtime and state directory. Disconnecting or deleting a session
+does not stop the worker or its schedules. Form-capable clients can approve work.
+Do not run stdio and service workers against the same state directory at once.
+
+GET /health and GET /metrics use the same authentication. Browser-origin requests
+are rejected. This is local single-owner authentication, not remote OAuth or team RBAC.
+
+On Windows, scripts/service.ps1 manages a per-user startup task:
+
+```powershell
+.\scripts\service.ps1 Install -ConfigPath C:\absolute\config.local.json
+.\scripts\service.ps1 Start
+.\scripts\service.ps1 Status
+.\scripts\service.ps1 Stop
+.\scripts\service.ps1 Uninstall
+```
+
+The task runs at user logon with limited permissions, hidden windows, and up to three
+process restarts after failure. Configure credentials and the service token in the
+user environment or your own secret-injecting launcher before starting it. Session-only
+PowerShell variables are not inherited by Task Scheduler. No credentials are written
+by the installer. Stop through the MCP process signals when possible; forcing the
+scheduled task to stop leaves active tasks interrupted for explicit recovery.
+The installer is supplied but is not automatically registered or started.
+Your computer must remain awake and signed in. This is not an always-on cloud worker.
+
+## Monitoring
+
+get_runtime_metrics reports persisted task counts across the full history, active
+task IDs, concurrency, recent failures, process uptime and memory, automation health,
+and aggregate/per-task reported tokens and USD costs. Provider reports can be incomplete;
+missing billing data is unknown rather than free. Claude-reported total_cost_usd and
+Codex turn usage are captured when supplied. No price catalog or billing API is queried.
+get_activity pages the durable cross-task event feed by sequence cursor. Status changes
+and stage lifecycle events remain available through the task event tools as well.
 
 ## Tests and Git history
 
-Run npm run check and npm test. Thirty-five behavior tests use a local mock provider and CLI subprocess fixtures,
+Run npm run check and npm test. Behavior tests use a local mock provider and CLI subprocess fixtures,
 real Git worktrees and the real MCP transport without spending API credits.
 Installed Codex and Claude CLI help was checked. Authenticated live model runs have not been tested.
 CLI contracts: https://developers.openai.com/codex/noninteractive and https://code.claude.com/docs/en/cli-reference
+
+For environments that disallow loopback connections, use the in-process provider fixture:
+
+```powershell
+$env:BYOK_TEST_IN_PROCESS = '1'
+$testFiles = Get-ChildItem test -Filter '*.test.mjs' | ForEach-Object FullName
+node --test --test-concurrency=1 --test-timeout=30000 --test-skip-pattern="MCP stdio|local event endpoint" @testFiles
+Remove-Item Env:BYOK_TEST_IN_PROCESS
+```
+
+This mode uses real SQLite, Git worktrees, subprocesses and in-memory MCP transports.
+Current validation passed 60 distinct behavior tests across the combined run and
+targeted follow-up runs. Two real-socket tests were excluded because loopback
+connections returned EACCES in the execution environment. Syntax checks also passed.
+It excludes the two tests that require real provider/webhook sockets. Service request
+authentication is tested by invoking its handler; actual HTTP MCP connections and
+Windows task registration still need validation on a machine permitting them.
 
 This session blocks writes to the default .git directory. Actual commits are in
 work/byok-history. Inspect them with ./scripts/git.ps1 log --oneline.
