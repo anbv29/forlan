@@ -770,3 +770,27 @@ test('invalid generated plans fail without launching children and storage rolls 
     await f.remove();
   }
 });
+
+test('three-way integration combines independent edits and refuses overlapping decisions', async () => {
+  const { mergeSnapshots } = await import('../src/merge.mjs');
+  const { git, createWorktree } = await import('../src/workspace.mjs');
+  const f = await fixture();
+  try {
+    const base = 'alpha\none\ntwo\nthree\nfour\nfive\nomega\n';
+    await writeFile(join(f.repository, 'answer.txt'), base);
+    await git(['add', '.'], f.repository);
+    await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'multiline base'], f.repository);
+    const config = { repositories: [f.repository], stateDir: join(f.directory, 'state') };
+    const task = await createWorktree(config, { id: 'merge-test', repository: f.repository });
+    const left = base.replace('alpha', 'LEFT');
+    const right = base.replace('omega', 'RIGHT');
+    const merged = await mergeSnapshots(config, task, [{ 'answer.txt': left }, { 'answer.txt': right }]);
+    assert.equal(merged.files['answer.txt'], base.replace('alpha', 'LEFT').replace('omega', 'RIGHT'));
+    assert.deepEqual(merged.resolvedFiles, ['answer.txt']);
+    await assert.rejects(mergeSnapshots(config, task,
+      [{ 'answer.txt': left }, { 'answer.txt': base.replace('alpha', 'OTHER') }]), /Dependency conflict/);
+    const deletion = await mergeSnapshots(config, task, [{ 'answer.txt': null }, { 'answer.txt': base }]);
+    assert.equal(deletion.files['answer.txt'], null);
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), base);
+  } finally { await f.remove(); }
+});

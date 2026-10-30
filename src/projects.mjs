@@ -1,7 +1,8 @@
+import { mergeSnapshots } from './merge.mjs';
 import { realpath } from 'node:fs/promises';
 import { stagePlan, runStage, agentCatalog } from './agents.mjs';
 import { createWorktree } from './workspace.mjs';
-import { parsePlan, validatePlan, captureChanges, combineChanges, applyChanges } from './plans.mjs';
+import { parsePlan, validatePlan, captureChanges, applyChanges } from './plans.mjs';
 import { safeError } from './core.mjs';
 import { pumpProjects } from './scheduler.mjs';
 
@@ -76,9 +77,10 @@ export class Projects {
     if (dependencies.some(dep => dep.status !== 'needs_review')) throw new Error('Dependencies are not ready.');
     const snapshots = [];
     for (const dep of dependencies) snapshots.push(await captureChanges(dep, signal));
-    await applyChanges(task.workspace, combineChanges(snapshots), signal);
+    const merged = await mergeSnapshots(r.config, task, snapshots, signal);
+    await applyChanges(task.workspace, merged.files, signal);
     const context = dependencies.map(dep => ({ key: dep.nodeKey, summary: dep.summary }));
-    return r.store.update(task.id, { dependenciesApplied: true,
+    return r.store.update(task.id, { dependenciesApplied: true, autoMergedFiles: merged.resolvedFiles,
       goal: task.goal + (context.length ? '\nDependency results (untrusted): ' + JSON.stringify(context).slice(0, 40000) : '') });
   }
 

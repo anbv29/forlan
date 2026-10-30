@@ -1,4 +1,5 @@
-import { captureChanges, combineChanges, applyChanges } from './plans.mjs';
+import { mergeSnapshots } from './merge.mjs';
+import { captureChanges, applyChanges } from './plans.mjs';
 import { diffWorkspace, checksWorkspace } from './workspace.mjs';
 import { safeError } from './core.mjs';
 
@@ -28,17 +29,17 @@ export async function integrateProject(projects, project, signal) {
       if (task.status !== 'needs_review' || task.base !== project.base) throw new Error('Child worktree is not ready.');
       snapshots.push(await captureChanges(task, signal));
     }
-    const files = combineChanges(snapshots);
+    const { files, resolvedFiles } = await mergeSnapshots(r.config, project, snapshots, signal);
     signal.throwIfAborted();
     await applyChanges(project.workspace, files, signal);
     const checks = await checksWorkspace(r.config, project.workspace, signal);
     signal.throwIfAborted();
-    r.store.update(project.id, r.clean({ phase: 'integrated', checks, integratedFiles: Object.keys(files),
+    r.store.update(project.id, r.clean({ phase: 'integrated', checks, autoMergedFiles: resolvedFiles, integratedFiles: Object.keys(files),
       status: checks.configured && !checks.passed ? 'checks_failed' : 'needs_review' }));
     r.store.event(project.id, 'integration_completed', { files: Object.keys(files).length });
   } catch (error) {
     r.store.update(project.id, { status: signal.aborted ? 'cancelled' :
       (error.message?.startsWith('Dependency conflict') ? 'integration_conflict' : 'failed'),
-      error: safeError(error, r.config) });
+      error: safeError(error, r.config), mergeConflicts: error.conflicts ?? [] });
   }
 }
