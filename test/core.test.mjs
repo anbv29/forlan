@@ -794,3 +794,37 @@ test('three-way integration combines independent edits and refuses overlapping d
     assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), base);
   } finally { await f.remove(); }
 });
+
+test('automation schedules handle intervals timezone dates and daylight-saving repetitions', async () => {
+  const { normalizeTrigger, nextOccurrence, occurrenceDate } = await import('../src/schedules.mjs');
+  const now = Date.parse('2026-10-30T00:00:00Z');
+  const interval = normalizeTrigger({ type: 'interval', everySeconds: 60 }, now);
+  assert.equal(nextOccurrence(interval, now), '2026-10-30T00:01:00.000Z');
+  assert.equal(nextOccurrence(interval, now + 185000), '2026-10-30T00:04:00.000Z');
+  const daily = normalizeTrigger({ type: 'daily', time: '09:00', timeZone: 'Asia/Kolkata' }, now);
+  assert.equal(nextOccurrence(daily, now), '2026-10-30T03:30:00.000Z');
+  assert.equal(occurrenceDate(daily, now), '2026-10-30');
+  const fallBack = normalizeTrigger({ type: 'daily', time: '01:30', timeZone: 'America/New_York' }, now);
+  assert.equal(nextOccurrence(fallBack, Date.parse('2026-11-01T05:31:00Z'), '2026-11-01'), '2026-11-02T06:30:00.000Z');
+  assert.throws(() => normalizeTrigger({ type: 'interval', everySeconds: 1 }, now), /Interval/);
+  assert.throws(() => normalizeTrigger({ type: 'once', at: '2026-10-29T00:00:00Z' }, now), /future/);
+  assert.throws(() => normalizeTrigger({ type: 'once', at: '2026-10-31 09:00' }, now), /timezone/);
+  assert.throws(() => normalizeTrigger({ type: 'event', eventType: '../command' }, now), /event type/);
+  assert.throws(() => normalizeTrigger({ type: 'daily', time: '25:00', timeZone: 'UTC' }, now));
+  assert.throws(() => normalizeTrigger({ type: 'daily', time: '09:00', timeZone: 'not-a-zone' }, now));
+  const once = normalizeTrigger({ type: 'once', at: '2026-10-31T09:00:00+05:30' }, now);
+  assert.equal(nextOccurrence(once, now), '2026-10-31T03:30:00.000Z');
+  assert.equal(nextOccurrence(once, Date.parse(once.at)), null);
+  assert.equal(nextOccurrence({ type: 'event' }, now), null);
+  const spring = normalizeTrigger({ type: 'daily', time: '02:30', timeZone: 'America/New_York' }, now);
+  assert.equal(nextOccurrence(spring, Date.parse('2027-03-14T00:00:00Z')), '2027-03-15T06:30:00.000Z');
+  const midnight = normalizeTrigger({ type: 'daily', time: '00:00', timeZone: 'UTC' }, now);
+  assert.equal(nextOccurrence(midnight, now), '2026-10-31T00:00:00.000Z');
+  const anchored = normalizeTrigger({ type: 'interval', everySeconds: 3600,
+    startAt: '2026-10-31T10:00:00Z' }, now);
+  assert.equal(nextOccurrence(anchored, now), '2026-10-31T10:00:00.000Z');
+  assert.deepEqual(normalizeTrigger({ type: 'event', eventType: 'github.push' }), { type: 'event', eventType: 'github.push' });
+  assert.throws(() => normalizeTrigger({ type: 'interval', everySeconds: 60.5 }, now));
+  assert.throws(() => normalizeTrigger({ type: 'unknown' }, now));
+  assert.throws(() => normalizeTrigger(null, now));
+});
