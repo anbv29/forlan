@@ -1,4 +1,5 @@
 import { resolveProject } from './resolution.mjs';
+import { ContextStore } from './context.mjs';
 import { Automations } from './automations.mjs';
 import { integrateProject } from './integration.mjs';
 import { Projects } from './projects.mjs';
@@ -32,6 +33,7 @@ export class Runtime {
     // A lock file never contains provider credentials.
     writeSync(this.lock.fd, String(process.pid));
     this.store.recover();
+    this.context = new ContextStore(this.store);
     this.active = new Map();
     this.closing = false;
     this.projects = new Projects(this);
