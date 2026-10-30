@@ -1,3 +1,4 @@
+import { Automations } from './automations.mjs';
 import { integrateProject } from './integration.mjs';
 import { Projects } from './projects.mjs';
 import { openSync, closeSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
@@ -33,6 +34,7 @@ export class Runtime {
     this.active = new Map();
     this.closing = false;
     this.projects = new Projects(this);
+    this.automations = new Automations(this);
   }
 
   clean(value) {
@@ -59,6 +61,7 @@ export class Runtime {
     entry.promise = this.execute(task, controller.signal).finally(() => {
       this.active.delete(task.id);
       this.projects.pump();
+      this.automations.taskFinished(this.store.get(task.id));
     });
   }
 
@@ -116,6 +119,7 @@ export class Runtime {
 
   async close() {
     this.closing = true;
+    await this.automations.close();
     for (const entry of this.active.values()) entry.controller.abort();
     await Promise.allSettled([...this.active.values()].map(entry => entry.promise));
     closeSync(this.lock.fd);

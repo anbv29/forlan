@@ -1,3 +1,4 @@
+import { webhookConfig } from './event-listener.mjs';
 import { normalizeAgents } from './agent-config.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
@@ -14,6 +15,7 @@ export function loadConfig(env = process.env) {
   if (!env.BYOK_CONFIG || !isAbsolute(env.BYOK_CONFIG)) throw new Error('Set BYOK_CONFIG to an absolute configuration path.');
   const raw = JSON.parse(readFileSync(env.BYOK_CONFIG, 'utf8'));
   const profiles = normalizeAgents(raw, env);
+  const automationWebhook = webhookConfig(raw.automationWebhook, env);
   const needsByok = Object.values(profiles.agents).some(p => p.kind === 'byok');
   if (!Array.isArray(raw.repositories) || !raw.repositories.length) throw new Error('Configure repositories.');
   if (needsByok && (typeof raw.model !== 'string' || !raw.model.trim())) throw new Error('Configure a model.');
@@ -38,8 +40,8 @@ export function loadConfig(env = process.env) {
   if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 100) throw new Error('maxSteps must be 1–100.');
   if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 8) throw new Error('maxConcurrent must be 1–8.');
   return { repositories, model: raw.model, baseUrl: endpoint.href.replace(/\/$/, ''),
-    apiKey, apiKeyEnv, stateDir, checks, maxSteps, maxConcurrent, ...profiles,
-    secrets: [apiKey, ...Object.values(profiles.agents).map(p => p.apiKey)].filter(Boolean) };
+    apiKey, apiKeyEnv, stateDir, checks, maxSteps, maxConcurrent, automationWebhook, ...profiles,
+    secrets: [apiKey, automationWebhook?.token, ...Object.values(profiles.agents).map(p => p.apiKey)].filter(Boolean) };
 }
 
 export class Store {

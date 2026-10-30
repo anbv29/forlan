@@ -1,3 +1,4 @@
+import { EventListener } from './event-listener.mjs';
 import { realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { AutomationStore } from './automation-store.mjs';
@@ -11,6 +12,7 @@ export class Automations {
     this.clock = options.clock ?? Date.now;
     this.store = new AutomationStore(runtime.store);
     this.ticking = false;
+    if (runtime.config.automationWebhook) this.listener = new EventListener(this, runtime.config.automationWebhook);
     const period = runtime.config.automationTickMs ?? 1000;
     if (options.polling !== false && period) {
       this.timer = setInterval(() => this.tick(), period);
