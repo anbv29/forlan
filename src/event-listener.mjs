@@ -66,14 +66,16 @@ export class EventListener {
       if (Number(req.headers['content-length'] ?? 0) > 65536) {
         req.resume(); this.respond(res, 413, { error: 'Event body exceeds 64 KB.' }); return;
       }
-      let body = '';
+      const chunks = [];
+      let bytes = 0;
       for await (const chunk of req) {
-        body += chunk.toString();
-        if (Buffer.byteLength(body) > 65536) {
+        bytes += chunk.length;
+        if (bytes > 65536) {
           this.respond(res, 413, { error: 'Event body exceeds 64 KB.' }); return;
         }
+        chunks.push(chunk);
       }
-      const result = this.engine.event(JSON.parse(body));
+      const result = this.engine.event(JSON.parse(Buffer.concat(chunks).toString('utf8')));
       this.respond(res, 202, result);
     } catch {
       if (!res.headersSent) this.respond(res, 400, { error: 'Invalid event request.' });

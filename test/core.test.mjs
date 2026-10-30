@@ -898,3 +898,93 @@ test('scheduled and named-event automations create fixed-goal tasks once', async
     assert.equal(engine.event({ ...event, id: 'delivery-2' }).runs.length, 0);
   } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
+
+test('local event endpoint authenticates deduplicates and bounds requests', async () => {
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res) => { calls++; reply(res, { content: 'Webhook completed.' }); });
+  const token = 'test-webhook-token-'.repeat(3);
+  const runtime = new Runtime({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1,
+    automationTickMs: 0, automationWebhook: { port: 0, token } });
+  try {
+    const engine = runtime.automations;
+    await engine.listener.ready;
+    const url = 'http://127.0.0.1:' + engine.listener.status().port + '/events';
+    const rule = await engine.create({ name: 'webhook', repository: f.repository, goal: 'Fixed task',
+      trigger: { type: 'event', eventType: 'webhook.changed' } });
+    engine.enable(rule.id);
+    const event = { id: 'http-event-1', type: 'webhook.changed', payload: {} };
+    const send = (headers, body = event) => fetch(url, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+    assert.equal((await send({})).status, 401);
+    assert.equal((await send({ Authorization: 'Bearer wrong' })).status, 401);
+    const headers = { Authorization: 'Bearer ' + token };
+    assert.equal((await send({ ...headers, Origin: 'https://untrusted.invalid' })).status, 403);
+    assert.equal((await send(headers, { ...event, payload: { large: 'x'.repeat(70000) } })).status, 413);
+    assert.equal((await send(headers)).status, 202);
+    const taskId = engine.get(rule.id).runs[0].taskId;
+    assert.equal((await waitTask(runtime, taskId)).status, 'needs_review');
+    const duplicate = await send(headers);
+    assert.equal((await duplicate.json()).duplicate, true);
+    assert.equal((await send(headers, { ...event, payload: { changed: true } })).status, 400);
+    assert.equal(calls, 1);
+    assert.ok(!JSON.stringify(engine.health()).includes(token));
+  } finally { await runtime.close(); await provider.close(); await f.remove(); }
+});
+
+test('MCP automation enablement requires human approval and honors task checkpoints', async () => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
+  const { ElicitRequestSchema } = await import('@modelcontextprotocol/sdk/types.js');
+  const { createServer: makeServer } = await import('../src/server.mjs');
+  const f = await fixture();
+  let calls = 0;
+  const provider = await mockProvider((_req, res) => { calls++; reply(res, { content: 'Approved automation task.' }); });
+  const app = makeServer({ repositories: [f.repository], stateDir: join(f.directory, 'state'),
+    baseUrl: provider.baseUrl, model: 'mock', checks: [], maxSteps: 1, maxConcurrent: 1,
+    requireApproval: true, automationTickMs: 0 });
+  const client = new Client({ name: 'automation-client', version: '1' }, { capabilities: { elicitation: { form: {} } } });
+  let approve = false;
+  let forms = 0;
+  client.setRequestHandler(ElicitRequestSchema, async () => { forms++; return { action: 'accept', content: { approve } }; });
+  const invoke = async (name, args = {}) => {
+    const result = await client.callTool({ name, arguments: args });
+    assert.ok(!result.isError, JSON.stringify(result));
+    return JSON.parse(result.content[0].text);
+  };
+  const [left, right] = InMemoryTransport.createLinkedPair();
+  try {
+    await Promise.all([app.server.connect(left), client.connect(right)]);
+    const draft = await invoke('create_automation', { name: 'Approved rule', repository: f.repository,
+      goal: 'Fixed instructions', trigger: { type: 'event', eventType: 'manual.changed' } });
+    assert.equal(draft.enabled, false);
+    assert.equal((await invoke('review_automation', { automationId: draft.id })).enabled, false);
+    assert.equal((await invoke('trigger_event', { eventId: 'before-approval', type: 'manual.changed' })).runs.length, 0);
+    approve = true;
+    assert.equal((await invoke('review_automation', { automationId: draft.id })).enabled, true);
+    await invoke('trigger_event', { eventId: 'after-approval', type: 'manual.changed' });
+    const run = (await invoke('get_automation', { automationId: draft.id })).runs[0];
+    assert.equal((await waitTask(app.runtime, run.taskId)).status, 'awaiting_approval');
+    assert.equal(calls, 0);
+    await invoke('review_checkpoint', { taskId: run.taskId, stageIndex: 0 });
+    assert.equal((await waitTask(app.runtime, run.taskId)).status, 'needs_review');
+    assert.equal(calls, 1);
+    assert.equal(forms, 3);
+    assert.equal((await invoke('list_automations')).automations.length, 1);
+    assert.equal((await invoke('disable_automation', { automationId: draft.id })).enabled, false);
+  } finally { await client.close(); await app.close(); await provider.close(); await f.remove(); }
+});
+
+test('webhook configuration requires a strong environment token and a valid port', async () => {
+  const { webhookConfig } = await import('../src/event-listener.mjs');
+  assert.equal(webhookConfig(undefined, {}), undefined);
+  assert.throws(() => webhookConfig({ port: 0 }, {}), /token/);
+  assert.throws(() => webhookConfig({ port: 70000 }, {}), /port/);
+  assert.throws(() => webhookConfig({ port: 0, tokenEnv: 'INVALID-NAME' }, {}), /token/);
+  assert.throws(() => webhookConfig({ port: 0 }, { AUTOMATION_EVENT_TOKEN: 'short' }), /token/);
+  const token = 'valid-private-token-'.repeat(3);
+  const config = webhookConfig({ port: 0 }, { AUTOMATION_EVENT_TOKEN: token });
+  assert.equal(config.port, 0);
+  assert.equal(config.token, token);
+});
