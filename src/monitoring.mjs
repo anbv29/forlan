@@ -11,6 +11,7 @@ export function monitoring(runtime) {
   const number = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
   for (const row of usage) {
     const detail = JSON.parse(row.data).detail;
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail)) continue;
     const task = tasks.get(row.task) ?? { taskId: row.task, inputTokens: 0, outputTokens: 0,
       reportedCostUsd: 0, costReports: 0 };
     const input = number(detail.prompt_tokens ?? detail.input_tokens);

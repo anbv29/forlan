@@ -66,6 +66,7 @@ test('SQLite preserves task state and event cursors across reopen', async () => 
 });
 
 export async function mockProvider(handler) {
+  if (process.env.BYOK_TEST_IN_PROCESS === '1') return (await import('./inprocess-provider.mjs')).inProcessProvider(handler);
   const server = createServer(async (req, res) => {
     let input = '';
     for await (const chunk of req) input += chunk;

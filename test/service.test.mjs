@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { repositoryFixture, mockInference, settled } from './helpers.mjs';
+import { join } from 'node:path';
 
 async function request(app, path, headers = {}, method = 'GET') {
   let status, result;
@@ -94,4 +95,17 @@ test('shared service clients still require human approval to resume interrupted 
 test('service refuses weak credentials and invalid ports before starting', async () => {
   await assert.rejects(startService({}, { token: 'short' }), /TOKEN/);
   await assert.rejects(startService({}, { token: 'x'.repeat(32), port: 99999 }), /port/);
+});
+
+test('failed service startup releases its runtime lock for a later retry', async () => {
+  const f = await repositoryFixture();
+  const token = 'x'.repeat(32);
+  const app = await startService(f.config, { token, port: 0 });
+  const config = { ...f.config, stateDir: join(f.directory, 'second-state') };
+  try {
+    await assert.rejects(startService(config, { token, port: app.server.address().port }), /EADDRINUSE/);
+    const retry = await startService(config, { token, port: 0 });
+    assert.equal(retry.runtime.closing, false);
+    await retry.close();
+  } finally { await app.close(); await f.remove(); }
 });

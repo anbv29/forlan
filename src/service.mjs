@@ -11,7 +11,7 @@ import { monitoring } from './monitoring.mjs';
 export async function startService(config, { token, port = 8788 } = {}) {
   if (typeof token !== 'string' || token.length < 32) throw new Error('Set BYOK_SERVICE_TOKEN to at least 32 characters.');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid service port.');
-  config = { ...config, secrets: [...(config.secrets ?? []), token] };
+  config = { ...config, secrets: [...(config.secrets ?? [config.apiKey]).filter(Boolean), token] };
   const runtime = new Runtime(config);
   const sessions = new Map();
   const respond = (res, code, value) => {
