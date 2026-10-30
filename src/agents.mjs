@@ -55,7 +55,9 @@ export async function runStage(config, task, store, signal) {
     changes ? 'Current changes: ' + JSON.stringify(changes).slice(0, 60000) : ''].filter(Boolean).join('\n\n');
   store.event(task.id, 'stage_started', { index: task.stageIndex, agent: name, kind: profile.kind });
   if (profile.kind === 'byok') {
-    return runAgent({ ...config, model: profile.model ?? config.model, apiKey: profile.apiKey ?? config.apiKey, readOnly: profile.readOnly ?? false }, { ...task, goal: brief }, store, signal);
+    const summary = await runAgent({ ...config, model: profile.model ?? config.model, apiKey: profile.apiKey ?? config.apiKey, readOnly: profile.readOnly ?? false }, { ...task, goal: brief }, store, signal);
+    store.event(task.id, 'stage_completed', { index: task.stageIndex, agent: name });
+    return summary;
   }
   const env = {};
   if (profile.apiKey) env[profile.kind === 'codex' ? 'CODEX_API_KEY' : 'ANTHROPIC_API_KEY'] = profile.apiKey;
@@ -64,6 +66,16 @@ export async function runStage(config, task, store, signal) {
     signal, config.agentTimeoutMs ?? 600000, { env, input: brief });
   if (result.code !== 0) throw new Error(profile.kind + ' exited unsuccessfully (' + result.code + ').');
   const summary = cliSummary(profile.kind, result.stdout);
+  if (profile.kind === 'claude') {
+    const report = JSON.parse(result.stdout);
+    if (report.usage || report.total_cost_usd !== undefined) store.event(task.id, 'usage', {
+      ...report.usage, cost_usd: report.total_cost_usd });
+  } else {
+    for (const line of result.stdout.split(/\r?\n/).filter(Boolean)) {
+      const event = JSON.parse(line);
+      if (event.type === 'turn.completed' && event.usage) store.event(task.id, 'usage', event.usage);
+    }
+  }
   store.event(task.id, 'stage_completed', { index: task.stageIndex, agent: name });
   return summary;
 }

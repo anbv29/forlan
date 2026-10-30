@@ -6,6 +6,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { createServer } from './server.mjs';
 import { Runtime } from './runtime.mjs';
 import { loadConfig } from './core.mjs';
+import { monitoring } from './monitoring.mjs';
 
 export async function startService(config, { token, port = 8788 } = {}) {
   if (typeof token !== 'string' || token.length < 32) throw new Error('Set BYOK_SERVICE_TOKEN to at least 32 characters.');
@@ -30,6 +31,9 @@ export async function startService(config, { token, port = 8788 } = {}) {
       }
       if (req.url === '/health' && req.method === 'GET') {
         respond(res, 200, { active: runtime.active.size, automations: runtime.automations.health() }); return;
+      }
+      if (req.url === '/metrics' && req.method === 'GET') {
+        respond(res, 200, monitoring(runtime)); return;
       }
       if (req.url !== '/mcp' || !['POST', 'GET', 'DELETE'].includes(req.method)) {
         req.resume(); respond(res, 404, { error: 'Not found.' }); return;

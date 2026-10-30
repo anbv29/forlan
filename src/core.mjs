@@ -68,8 +68,10 @@ export class Store {
   }
 
   update(id, fields) {
-    const task = { ...this.get(id), ...fields, updatedAt: new Date().toISOString() };
+    const previous = this.get(id);
+    const task = { ...previous, ...fields, updatedAt: new Date().toISOString() };
     this.db.prepare('UPDATE tasks SET data = ? WHERE id = ?').run(this.serialize(task), id);
+    if (task.status !== previous.status) this.event(id, 'status_changed', { from: previous.status, to: task.status });
     return task;
   }
 

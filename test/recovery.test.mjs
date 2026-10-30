@@ -25,7 +25,7 @@ test('recovery preserves completed stages and requires a fresh stage approval', 
     await assert.rejects(resumeTask(runtime, created.id), /interrupted/);
     store.update(created.id, { status: 'cancelled' });
     await assert.rejects(resumeTask(runtime, created.id), /interrupted/);
-    assert.equal(store.events(created.id)[0].kind, 'recovery_requested');
+    assert.ok(store.events(created.id).some(event => event.kind === 'recovery_requested'));
   } finally { store.close(); await rm(directory, { recursive: true, force: true }); }
 });
 

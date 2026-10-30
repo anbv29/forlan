@@ -54,12 +54,12 @@ test('SQLite preserves task state and event cursors across reopen', async () => 
     const task = store.create(f.repository, 'Goal');
     store.update(task.id, { status: 'running' });
     store.event(task.id, 'tool', { name: 'read_file' });
-    const first = store.events(task.id)[0];
+    const first = store.events(task.id).at(-1);
     store.close();
     store = new Store(join(f.directory, 'state'));
     store.recover();
     assert.equal(store.get(task.id).status, 'interrupted');
-    assert.deepEqual(store.events(task.id, first.sequence), []);
+    assert.equal(store.events(task.id, first.sequence)[0].detail.to, 'interrupted');
     assert.throws(() => store.get('missing'), /Unknown/);
     store.close();
   } finally { await f.remove(); }
