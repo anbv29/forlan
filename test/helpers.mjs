@@ -13,6 +13,7 @@ export async function repositoryFixture() {
     assert.equal(result.code, 0, result.output);
   };
   await git(['init', '--separate-git-dir', join(directory, 'metadata')]);
+  await git(['config', 'core.autocrlf', 'false']);
   await writeFile(join(repository, 'answer.txt'), 'Original answer\n');
   await git(['add', 'answer.txt']);
   await git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'test fixture']);

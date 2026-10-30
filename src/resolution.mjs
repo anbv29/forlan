@@ -1,10 +1,10 @@
 import { mergeSnapshots } from './merge.mjs';
 import { captureChanges, applyChanges } from './plans.mjs';
-import { diffWorkspace, readWorkspace, checksWorkspace } from './workspace.mjs';
+import { diffWorkspace, readWorkspace, checksWorkspace, createWorktree } from './workspace.mjs';
 import { stagePlan, runStage } from './agents.mjs';
 import { safeError } from './core.mjs';
 import { validateResolutions } from './conflict-review.mjs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 export function beginResolution(projects, id, agent) {
   const r = projects.runtime, project = r.store.get(id);
@@ -20,6 +20,8 @@ export function beginResolution(projects, id, agent) {
 
 export async function resolveProject(projects, project, signal) {
   const r = projects.runtime;
+  const original = project;
+  let candidate;
   try {
     r.store.update(project.id, { status: 'running' });
     const existing = await diffWorkspace(project, signal);
@@ -51,6 +53,9 @@ export async function resolveProject(projects, project, signal) {
       merged.files[conflict.path] = '<<<<<<< BYOK_OURS\n' + line(conflict.ours) +
         '||||||| BYOK_BASE\n' + line(conflict.base) + '=======\n' + line(conflict.theirs) + '>>>>>>> BYOK_THEIRS\n';
     }
+    candidate = await createWorktree(r.config, { id: randomUUID(), repository: project.repository, baseRef: project.base }, signal);
+    r.store.update(project.id, { resolutionCandidate: candidate });
+    project = { ...project, ...candidate };
     await applyChanges(project.workspace, merged.files, signal);
     const goal = project.goal + '\nResolve the listed conflicts while preserving the intent of all task changes. ' +
       'Edit only these files: ' + JSON.stringify(paths) + '. Remove all BYOK conflict markers. ' +
@@ -79,10 +84,11 @@ export async function resolveProject(projects, project, signal) {
     }
     const checks = await checksWorkspace(r.config, project.workspace, signal);
     signal.throwIfAborted();
-    r.store.update(project.id, r.clean({ phase: 'integrated', summary, checks,
+    r.store.update(project.id, r.clean({ ...candidate, phase: 'integrated', summary, checks, error: null,
       conflictResolution: { agent: decisions ? 'human' : project.resolverAgent, files: paths, status: 'proposed_for_review' },
       status: checks.configured && !checks.passed ? 'checks_failed' : 'needs_review' }));
   } catch (error) {
-    r.store.update(project.id, { status: signal.aborted ? 'cancelled' : 'failed', error: safeError(error, r.config) });
+    r.store.update(original.id, { status: signal.aborted ? 'cancelled' : 'integration_conflict',
+      failedResolutionCandidate: candidate ?? null, error: safeError(error, r.config) });
   }
 }

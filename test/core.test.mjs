@@ -1116,9 +1116,9 @@ test('resolver cannot claim success while conflict markers remain', async () => 
     assert.equal((await waitTask(runtime, project.id)).status, 'integration_conflict');
     beginResolution(runtime.projects, project.id);
     const failed = await waitTask(runtime, project.id);
-    assert.equal(failed.status, 'failed');
+    assert.equal(failed.status, 'integration_conflict');
     assert.match(failed.error, /conflict markers/);
-    assert.match(await readFile(join(failed.workspace, 'answer.txt'), 'utf8'), /BYOK_OURS/);
+    assert.match(await readFile(join(failed.failedResolutionCandidate.workspace, 'answer.txt'), 'utf8'), /BYOK_OURS/);
     assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
   } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
