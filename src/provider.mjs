@@ -65,7 +65,9 @@ async function executeTool(call, config, workspace, signal) {
   switch (name) {
     case 'list_files': return listWorkspace(workspace, signal);
     case 'read_file': return readWorkspace(workspace, args.path);
-    case 'write_file': return writeWorkspace(workspace, args.path, args.content);
+    case 'write_file':
+      if (config.allowedWritePaths && !config.allowedWritePaths.includes(args.path)) throw new Error('Write is outside the approved conflict set.');
+      return writeWorkspace(workspace, args.path, args.content);
     case 'run_checks': return checksWorkspace(config, workspace, signal);
     default: throw new Error('Unknown tool.');
   }

@@ -40,7 +40,7 @@ async function mergeText(config, task, path, base, ours, theirs, signal) {
   }
 }
 
-export async function mergeSnapshots(config, task, snapshots, signal) {
+export async function mergeSnapshots(config, task, snapshots, signal, options = {}) {
   const files = Object.create(null);
   const bases = new Map();
   const resolvedFiles = new Set();
@@ -56,17 +56,17 @@ export async function mergeSnapshots(config, task, snapshots, signal) {
         resolvedFiles.add(path);
       } catch (error) {
         signal?.throwIfAborted();
-        conflicts.push({ path, reason: error.message });
+        conflicts.push({ path, reason: error.message, base: bases.get(path), ours: files[path], theirs: content });
       }
     }
   }
-  if (conflicts.length) {
+  if (conflicts.length && !options.collectConflicts) {
     const error = new Error('Dependency conflict in ' + conflicts.map(c => c.path).join(', ') + '; overlapping edits require review.');
-    error.conflicts = conflicts;
+    error.conflicts = conflicts.map(({ path, reason }) => ({ path, reason }));
     throw error;
   }
   let bytes = 0;
   for (const [path, content] of Object.entries(files)) bytes += Buffer.byteLength(path) + Buffer.byteLength(content ?? '');
   if (bytes > 1000000 || Object.keys(files).length > 500) throw new Error('Combined changes exceed snapshot limits.');
-  return { files, resolvedFiles: [...resolvedFiles] };
+  return { files, resolvedFiles: [...resolvedFiles], conflicts };
 }

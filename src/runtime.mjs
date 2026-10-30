@@ -1,3 +1,4 @@
+import { resolveProject } from './resolution.mjs';
 import { Automations } from './automations.mjs';
 import { integrateProject } from './integration.mjs';
 import { Projects } from './projects.mjs';
@@ -66,6 +67,7 @@ export class Runtime {
   }
 
   async execute(task, signal) {
+    if (task.kind === 'project' && task.phase === 'resolution') return resolveProject(this.projects, task, signal);
     if (task.kind === 'project' && task.phase === 'integration') return integrateProject(this.projects, task, signal);
     return task.kind === 'project' ? this.projects.generate(task, signal) : executePipeline(this, task, signal); }
 

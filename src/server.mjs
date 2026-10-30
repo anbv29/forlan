@@ -1,3 +1,4 @@
+import { beginResolution } from './resolution.mjs';
 import { registerAutomationTools } from './automation-tools.mjs';
 import { beginIntegration } from './integration.mjs';
 import { resumeProject } from './scheduler.mjs';
@@ -126,6 +127,24 @@ export function createServer(config) {
       });
       if (response.action !== 'accept' || response.content?.approve !== true) return { id: taskId, status: project.status };
       return beginIntegration(runtime.projects, taskId);
+    });
+
+  register('resolve_project_conflicts', 'Ask the human to authorize an editing agent to propose resolutions for overlapping text conflicts. ' +
+    'Configured checks run afterward and the candidate remains for human review.',
+    { ...id, agent: z.string().optional() }, async ({ taskId, agent }) => {
+      const project = runtime.store.get(taskId);
+      if (project.kind !== 'project' || project.status !== 'integration_conflict') throw new Error('Project has no unresolved integration conflict.');
+      if (!server.server.getClientCapabilities()?.elicitation) throw new Error('MCP form elicitation is required.');
+      const response = await server.server.elicitInput({
+        mode: 'form', message: 'Run ' + (agent ?? config.defaultAgent ?? 'byok') +
+          ' to propose resolutions for ' + JSON.stringify(project.mergeConflicts ?? []) +
+          '? This uses model credits, edits the project worktree and runs configured checks. Review the resulting diff.',
+        requestedSchema: { type: 'object', properties: {
+          approve: { type: 'boolean', title: 'Resolve conflicts with an agent', default: false }
+        }, required: ['approve'] }
+      });
+      if (response.action !== 'accept' || response.content?.approve !== true) return { id: taskId, status: project.status };
+      return beginResolution(runtime.projects, taskId, agent);
     });
 
   registerAutomationTools(register, server, runtime);
