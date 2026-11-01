@@ -1,5 +1,9 @@
 # BYOK Agent MCP
 
+See [QUICKSTART.md](QUICKSTART.md) for Windows/Codex setup, registration,
+usage examples and diagnostics. The server exposes 33 tools, the `byok://guide`
+resource, and the `implement-change` prompt.
+
 Local coding tasks through MCP using your own inference credentials.
 Independent implementation inspired by the Alan report; no Alan binaries or services.
 
