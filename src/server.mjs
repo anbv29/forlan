@@ -1,4 +1,5 @@
 import { beginResolution } from './resolution.mjs';
+import { registerDiscovery } from './discovery.mjs';
 import { registerContextTools } from './context-tools.mjs';
 import { registerRecoveryTools } from './recovery.mjs';
 import { registerMonitoringTools } from './monitoring.mjs';
@@ -156,6 +157,7 @@ export function createServer(config, options = {}) {
   registerRecoveryTools(register, server, runtime, z);
   registerMonitoringTools(register, runtime);
   registerConflictTools(register, server, runtime);
+  registerDiscovery(server, register, runtime);
 
   let closePromise;
   const close = () => closePromise ??= runtime.close();
