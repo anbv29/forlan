@@ -1,1 +1,40 @@
-{"name":"byok-agent-mcp","version":"0.1.0","private":true,"type":"module","engines":{"node":">=24.0.0"},"scripts":{"start":"node src/server.mjs","setup":"node scripts/setup.mjs","doctor":"node scripts/doctor.mjs","smoke":"node scripts/smoke.mjs","test":"node --test --test-concurrency=1","check":"node scripts/check.mjs"},"dependencies":{"@modelcontextprotocol/sdk":"1.32.2","zod":"3.25.76"}}
+{
+  "name": "byok-agent-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "setup": "node scripts/setup.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "node --test --test-concurrency=1 --test-timeout=30000 test/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "service": "node src/service.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "3.25.76"
+  },
+  "description": "Local BYOK coding-agent orchestration through MCP, with approvals and isolated Git worktrees",
+  "bin": {
+    "forlan": "src/cli.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anbv29/forlan.git"
+  },
+  "files": [
+    "src/",
+    "scripts/",
+    "test/",
+    "README.md",
+    "QUICKSTART.md",
+    "CHANGELOG.md",
+    "config*.example.json",
+    "automation.examples.json"
+  ]
+}
