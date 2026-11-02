@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { command, safePath, commandEnv } from '../src/workspace.mjs';
 import { loadConfig, Store } from '../src/core.mjs';
 import { Runtime } from '../src/runtime.mjs';
+import { httpFetch } from './http-client.mjs';
 
 export async function fixture() {
   await mkdir(resolve('work'), { recursive: true });
@@ -907,9 +908,7 @@ test('scheduled and named-event automations create fixed-goal tasks once', async
   } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
 
-test('local event endpoint authenticates deduplicates and bounds requests', {
-  skip: process.env.BYOK_TEST_IN_PROCESS === '1' && 'Loopback unavailable; run test:network on an unrestricted machine.'
-}, async () => {
+test('local event endpoint authenticates deduplicates and bounds requests', async () => {
   const f = await fixture();
   let calls = 0;
   const provider = await mockProvider((_req, res) => { calls++; reply(res, { content: 'Webhook completed.' }); });
@@ -920,6 +919,7 @@ test('local event endpoint authenticates deduplicates and bounds requests', {
   try {
     const engine = runtime.automations;
     await engine.listener.ready;
+    const fetch = httpFetch(engine.listener.server);
     const url = 'http://127.0.0.1:' + engine.listener.status().port + '/events';
     const rule = await engine.create({ name: 'webhook', repository: f.repository, goal: 'Fixed task',
       trigger: { type: 'event', eventType: 'webhook.changed' } });

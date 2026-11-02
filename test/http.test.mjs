@@ -5,15 +5,17 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { startService } from '../src/service.mjs';
 import { repositoryFixture, settled } from './helpers.mjs';
+import { httpFetch } from './http-client.mjs';
 
-const options = { skip: process.env.BYOK_TEST_IN_PROCESS === '1' &&
-  'Loopback unavailable; run test:network on an unrestricted machine.', timeout: 20000 };
+const options = { timeout: 20000 };
 
 test('HTTP MCP initializes discovers tools and reconnects without losing paused work', options, async () => {
   const f = await repositoryFixture();
   const token = 'http-fixture-token-'.repeat(3);
   const app = await startService({ ...f.config, requireApproval: true }, { token, port: 0 });
+  const fetch = httpFetch(app.server);
   const transport = new StreamableHTTPClientTransport(new URL(app.url + '/mcp'), {
+    fetch,
     requestInit: { headers: { Authorization: 'Bearer ' + token } }
   });
   const client = new Client({ name: 'http-test', version: '1' });
@@ -37,6 +39,7 @@ test('HTTP MCP initializes discovers tools and reconnects without losing paused 
     assert.equal(app.runtime.store.get(task.id).stageIndex, 0);
     reconnected = new Client({ name: 'http-reconnected', version: '1' });
     const nextTransport = new StreamableHTTPClientTransport(new URL(app.url + '/mcp'), {
+      fetch,
       requestInit: { headers: { Authorization: 'Bearer ' + token } }
     });
     await reconnected.connect(nextTransport);
@@ -55,6 +58,7 @@ test('HTTP MCP delivers human approval forms and honors rejection before model e
   const f = await repositoryFixture();
   const token = 'http-approval-token-'.repeat(3);
   const app = await startService({ ...f.config, requireApproval: true }, { token, port: 0 });
+  const fetch = httpFetch(app.server);
   const client = new Client({ name: 'http-approval', version: '1' }, { capabilities: { elicitation: { form: {} } } });
   let forms = 0;
   client.setRequestHandler(ElicitRequestSchema, async () => {
@@ -62,6 +66,7 @@ test('HTTP MCP delivers human approval forms and honors rejection before model e
     return { action: 'accept', content: { approve: false } };
   });
   const transport = new StreamableHTTPClientTransport(new URL(app.url + '/mcp'), {
+    fetch,
     requestInit: { headers: { Authorization: 'Bearer ' + token } }
   });
   try {
@@ -84,6 +89,7 @@ test('HTTP service rejects unauthenticated browser-origin malformed and oversize
   const f = await repositoryFixture();
   const token = 'http-boundary-token-'.repeat(3);
   const app = await startService(f.config, { token, port: 0 });
+  const fetch = httpFetch(app.server);
   const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
   const send = (path, init = {}) => fetch(app.url + path, { ...init, signal: AbortSignal.timeout(5000) });
   try {
