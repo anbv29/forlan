@@ -107,3 +107,76 @@ test('patch export refuses binary and oversized new files instead of returning p
     await f.remove();
   }
 });
+
+test('portable patches preserve Unicode names and trailing whitespace exactly', async () => {
+  const f = await repositoryFixture();
+  try {
+    const base = (await command('git', ['rev-parse', 'HEAD'], f.repository)).stdout.trim();
+    const tracked = 'Updated answer with trailing spaces   \n';
+    const content = 'Unicode contents and a trailing tab\t\n';
+    const name = 'café-文件.txt';
+    await writeFile(join(f.repository, 'answer.txt'), tracked);
+    await writeFile(join(f.repository, name), content);
+    const patch = await exportPatch({ workspace: f.repository, base });
+    const file = join(f.directory, 'unicode.patch');
+    await writeFile(file, patch.patch);
+    await f.git(['checkout', '--', 'answer.txt']);
+    await unlink(join(f.repository, name));
+    await f.git(['apply', '--check', file]);
+    await f.git(['apply', file]);
+    assert.equal(await readFile(join(f.repository, name), 'utf8'), content);
+    assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), tracked);
+    assert.equal((await command('git', ['diff', '--cached'], f.repository)).stdout, '');
+  } finally { await f.remove(); }
+});
+
+test('portable patches preserve empty files and files without a final newline', async () => {
+  const f = await repositoryFixture();
+  try {
+    const base = (await command('git', ['rev-parse', 'HEAD'], f.repository)).stdout.trim();
+    await writeFile(join(f.repository, 'empty.txt'), '');
+    await writeFile(join(f.repository, 'no-newline.txt'), 'last line without newline');
+    const patch = await exportPatch({ workspace: f.repository, base });
+    const file = join(f.directory, 'endings.patch');
+    await writeFile(file, patch.patch);
+    await unlink(join(f.repository, 'empty.txt'));
+    await unlink(join(f.repository, 'no-newline.txt'));
+    await f.git(['apply', '--check', file]);
+    await f.git(['apply', file]);
+    assert.equal(await readFile(join(f.repository, 'empty.txt'), 'utf8'), '');
+    assert.equal(await readFile(join(f.repository, 'no-newline.txt'), 'utf8'), 'last line without newline');
+    assert.match(patch.patch, /No newline at end of file/);
+  } finally { await f.remove(); }
+});
+
+test('oversized combined exports fail without staging files or returning partial data', async () => {
+  const f = await repositoryFixture();
+  try {
+    const base = (await command('git', ['rev-parse', 'HEAD'], f.repository)).stdout.trim();
+    const first = 'a'.repeat(80000);
+    const second = 'b'.repeat(80000);
+    await writeFile(join(f.repository, 'first.txt'), first);
+    await writeFile(join(f.repository, 'second.txt'), second);
+    await assert.rejects(exportPatch({ workspace: f.repository, base }), /150 KB/);
+    assert.equal((await command('git', ['diff', '--cached'], f.repository)).stdout, '');
+    assert.equal(await readFile(join(f.repository, 'first.txt'), 'utf8'), first);
+    assert.equal(await readFile(join(f.repository, 'second.txt'), 'utf8'), second);
+    await unlink(join(f.repository, 'first.txt'));
+    await unlink(join(f.repository, 'second.txt'));
+    assert.equal((await exportPatch({ workspace: f.repository, base })).bytes, 0);
+  } finally { await f.remove(); }
+});
+
+test('patch export treats leading dashes in filenames as paths rather than Git options', async () => {
+  const f = await repositoryFixture();
+  try {
+    const base = (await command('git', ['rev-parse', 'HEAD'], f.repository)).stdout.trim();
+    await writeFile(join(f.repository, '--config.txt'), 'safe filename\n');
+    const patch = await exportPatch({ workspace: f.repository, base });
+    await writeFile(join(f.directory, 'option.patch'), patch.patch);
+    await unlink(join(f.repository, '--config.txt'));
+    await f.git(['apply', '--check', join(f.directory, 'option.patch')]);
+    await f.git(['apply', join(f.directory, 'option.patch')]);
+    assert.equal(await readFile(join(f.repository, '--config.txt'), 'utf8'), 'safe filename\n');
+  } finally { await f.remove(); }
+});

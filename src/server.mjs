@@ -12,12 +12,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { loadConfig, safeError } from './core.mjs';
 import { Runtime } from './runtime.mjs';
 
 export function createServer(config, options = {}) {
   const runtime = options.runtime ?? new Runtime(config);
-  const server = new McpServer({ name: 'byok-agent-mcp', version: '0.1.0' });
+  const metadata = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const server = new McpServer({ name: 'byok-agent-mcp', version: metadata.version });
   const id = { taskId: z.string().uuid() };
   const register = (name, description, inputSchema, handler, readOnlyHint = false) => {
     server.registerTool(name, {

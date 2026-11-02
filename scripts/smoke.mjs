@@ -16,7 +16,7 @@ try {
   if (result.isError) throw new Error(result.content[0].text);
   const resources = await client.listResources();
   const prompts = await client.listPrompts();
-  console.log(JSON.stringify({ connected: true, toolCount: tools.tools.length,
+  console.log(JSON.stringify({ connected: true, server: client.getServerVersion(), toolCount: tools.tools.length,
     tools: tools.tools.map(tool => tool.name), resources: resources.resources.map(r => r.uri),
     prompts: prompts.prompts.map(p => p.name), configuration: JSON.parse(result.content[0].text),
     inferenceUsed: false }, null, 2));
