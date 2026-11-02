@@ -121,7 +121,11 @@ export class Runtime {
     return entry.promise;
   }
 
-  async close() {
+  close() {
+    return this.closePromise ??= this.shutdown();
+  }
+
+  async shutdown() {
     this.closing = true;
     await this.automations.close();
     for (const entry of this.active.values()) entry.controller.abort();

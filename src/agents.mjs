@@ -64,7 +64,8 @@ export async function runStage(config, task, store, signal) {
   const [executable, ...prefix] = profile.command;
   const result = await command(executable, [...prefix, ...cliArguments(profile, config)], task.workspace,
     signal, config.agentTimeoutMs ?? 600000, { env, input: brief });
-  if (result.code !== 0) throw new Error(profile.kind + ' exited unsuccessfully (' + result.code + ').');
+  if (result.code !== 0) throw new Error(profile.kind + ' exited unsuccessfully (' + result.code + '). ' +
+    (result.timedOut ? 'Agent execution timed out. ' : '') + result.output.slice(-2000));
   const summary = cliSummary(profile.kind, result.stdout);
   if (profile.kind === 'claude') {
     const report = JSON.parse(result.stdout);
