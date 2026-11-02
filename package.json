@@ -11,9 +11,11 @@
     "setup": "node scripts/setup.mjs",
     "doctor": "node scripts/doctor.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "test": "node --test --test-concurrency=1 --test-timeout=30000 test/*.test.mjs",
+    "test": "node scripts/test.mjs",
     "check": "node scripts/check.mjs",
-    "service": "node src/service.mjs"
+    "service": "node src/service.mjs",
+    "test:network": "node scripts/test.mjs --network",
+    "test:portable": "node scripts/test.mjs --in-process"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
