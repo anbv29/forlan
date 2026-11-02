@@ -1,6 +1,6 @@
 # Forlan
 
-Local coding-agent orchestration through MCP. Version 1.0.0 supplies a CLI,
+Local coding-agent orchestration through MCP. Version 1.0.1 supplies a CLI,
 33 tools, human approval checkpoints, and isolated Git worktrees.
 
 See [QUICKSTART.md](QUICKSTART.md) for Windows/Codex setup, registration,
@@ -343,9 +343,9 @@ CLI contracts: https://developers.openai.com/codex/noninteractive and https://co
 
 The test runner probes loopback access before starting the suite. Local runs use
 real sockets when available, or in-process model fixtures when permission is
-denied. The stdio end-to-end test still runs in both modes, using a test-only file
-request/reply bridge when sockets are unavailable. It checks actual file edits,
-verification and restart persistence in the real MCP subprocess.
+denied. Every test runs in both modes. The stdio end-to-end test uses a test-only
+file request/reply bridge when sockets are unavailable and checks actual file
+edits, verification and restart persistence in the real MCP subprocess.
 
 ```powershell
 npm.cmd test
@@ -354,13 +354,17 @@ npm.cmd run test:network
 ```
 
 Portable mode uses real SQLite, Git worktrees, subprocesses and MCP transports.
-Four socket-specific checks (three HTTP MCP tests and one webhook test) report
-explicit skips. Skips are not passes. Unexpected probe failures still fail the
-run rather than silently changing test mode.
+HTTP sessions, approval forms, reconnects and webhooks run through Node's actual
+HTTP parser and production request handlers, connected with in-memory duplex
+streams instead of OS sockets. Request parsing, response streaming, SSE cancellation
+and authentication are exercised without fabricated HTTP responses. No tests are
+skipped. Separate fixture tests check request bytes and connection cancellation.
 
-Network mode requires loopback permission and runs every test. It fails immediately
-with an actionable diagnostic when permission is denied. GitHub Actions uses this
-strict mode on Linux and Windows, without silently falling back to fixtures.
+Network mode runs the same tests over actual TCP connections. It requires loopback
+permission and fails immediately with an actionable diagnostic when denied.
+GitHub Actions uses this strict mode on Linux and Windows, without silently falling
+back to memory connections. Portable results validate the HTTP protocol and server
+behavior, while physical TCP access remains a separate environment check.
 Authenticated inference and Windows task registration remain separate checks;
 fixture results do not establish live model quality.
 

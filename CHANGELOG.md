@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Run HTTP session, approval, reconnect and webhook tests in portable mode without skips.
+- Exercise production HTTP handlers through Node's parser and in-memory byte streams.
+- Verify request parsing and streaming cancellation independently of the MCP workflow.
+- Keep TCP validation strict in network mode and CI.
+
 ## 1.0.0
 
 First packaged local MCP release of Forlan.

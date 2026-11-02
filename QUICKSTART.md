@@ -4,6 +4,15 @@ Forlan coordinates coding agents through MCP in isolated Git worktrees. It runs
 locally through your existing MCP client, without a separate desktop application.
 Requires Node.js 24+, Git, and a target repository with a committed HEAD.
 
+For the downloadable npm archive, run:
+
+```powershell
+npm.cmd install --global .\byok-agent-mcp-1.0.1.tgz
+forlan setup --repository C:\path\to\your\project --register
+```
+
+The steps below are for a Git clone.
+
 ## Install and connect
 
 Clone the repository and open its folder in PowerShell. In this workspace that
@@ -87,10 +96,11 @@ The package supplies `forlan start`, `service`, `setup`, `doctor` and `smoke`.
 From a clone, `node src/cli.mjs --help` shows commands. Use
 `node src/cli.mjs --config C:\path\config.json doctor` to select a configuration.
 
-Run `npm.cmd run check` and `npm.cmd test`. Tests detect blocked loopback access
-and use portable fixtures while still exercising the actual stdio MCP subprocess.
-Four genuine socket checks report explicit skips when networking is unavailable.
-Use `npm.cmd run test:network` to require every test; GitHub Actions uses that mode
-on Linux and Windows. `npm.cmd run test:portable` explicitly selects fixtures.
+Run `npm.cmd run check` and `npm.cmd test`. All tests run with no skips, even when
+loopback is blocked. Portable mode exercises the real stdio subprocess and routes
+HTTP bytes through Node's HTTP parser, MCP transports and production handlers
+using memory streams. `npm.cmd run test:network` runs the same checks over actual
+TCP; GitHub Actions requires that mode on Linux and Windows.
+`npm.cmd run test:portable` explicitly selects memory connections.
 Doctor and smoke spend no model credits. Fixture results do not prove live model
 quality. README.md explains the test modes and background-worker setup.

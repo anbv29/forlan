@@ -28,7 +28,7 @@ export async function selectTestMode({ mode = 'auto', ci = false, probe = probeL
   if (mode === 'in-process') return { mode, reason: 'explicitly requested' };
   const capability = await probe();
   if (capability.available) return { mode: 'network', reason: 'loopback probe passed' };
-  if (mode === 'network' || ci) throw new Error('Socket tests require loopback access (' + capability.reason + '). ' +
+  if (mode === 'network' || ci) throw new Error('Network-mode tests require loopback access (' + capability.reason + '). ' +
     'Run on an unrestricted machine; use npm run test:portable for fixture and stdio checks here.');
   return { mode: 'in-process', reason: 'loopback denied: ' + capability.reason };
 }
@@ -40,7 +40,7 @@ export async function runTests(args = process.argv.slice(2)) {
     process.env.BYOK_TEST_IN_PROCESS === '1' ? 'in-process' : 'auto';
   const selected = await selectTestMode({ mode, ci: !!process.env.CI });
   console.error('Test mode: ' + selected.mode + ' (' + selected.reason + ').');
-  if (selected.mode === 'in-process') console.error('Socket-only checks will be explicitly skipped. Network CI must run test:network.');
+  if (selected.mode === 'in-process') console.error('All protocol checks run through memory connections. Physical TCP validation requires test:network.');
   const root = fileURLToPath(new URL('../', import.meta.url));
   const files = (await readdir(join(root, 'test'))).filter(name => name.endsWith('.test.mjs')).sort()
     .map(name => join(root, 'test', name));
