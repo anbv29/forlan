@@ -15,6 +15,7 @@ First packaged local MCP release of Forlan.
 - Portable patch export preserving Unicode paths, empty files and whitespace.
 - Idempotent shutdown and redacted CLI failure diagnostics.
 - Linux/Windows CI for the full suite, including actual HTTP approvals and sessions.
+- Loopback capability detection, portable stdio fixtures and strict network test mode.
 
 This is a local single-owner product. Cloud workers, team accounts, browser
 verification and native GitHub/Slack/Linear task integrations are outside this

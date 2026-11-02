@@ -87,9 +87,10 @@ The package supplies `forlan start`, `service`, `setup`, `doctor` and `smoke`.
 From a clone, `node src/cli.mjs --help` shows commands. Use
 `node src/cli.mjs --config C:\path\config.json doctor` to select a configuration.
 
-Run `npm.cmd run check` and `npm.cmd test` for the complete suite. GitHub Actions
-runs it on Linux and Windows, including actual HTTP MCP sessions and webhooks.
-Doctor and smoke spend no model credits. Fixture tests do not prove live model
-quality. This build session restricts loopback connections and some user state
-folders, so local socket and authenticated inference validation is incomplete.
-README.md explains the explicit in-process test mode and background setup.
+Run `npm.cmd run check` and `npm.cmd test`. Tests detect blocked loopback access
+and use portable fixtures while still exercising the actual stdio MCP subprocess.
+Four genuine socket checks report explicit skips when networking is unavailable.
+Use `npm.cmd run test:network` to require every test; GitHub Actions uses that mode
+on Linux and Windows. `npm.cmd run test:portable` explicitly selects fixtures.
+Doctor and smoke spend no model credits. Fixture results do not prove live model
+quality. README.md explains the test modes and background-worker setup.

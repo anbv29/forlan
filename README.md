@@ -341,23 +341,28 @@ real Git worktrees and the real MCP transport without spending API credits.
 Installed Codex and Claude CLI help was checked. Authenticated live model runs have not been tested.
 CLI contracts: https://developers.openai.com/codex/noninteractive and https://code.claude.com/docs/en/cli-reference
 
-For environments that disallow loopback connections, use the in-process provider fixture:
+The test runner probes loopback access before starting the suite. Local runs use
+real sockets when available, or in-process model fixtures when permission is
+denied. The stdio end-to-end test still runs in both modes, using a test-only file
+request/reply bridge when sockets are unavailable. It checks actual file edits,
+verification and restart persistence in the real MCP subprocess.
 
 ```powershell
-$env:BYOK_TEST_IN_PROCESS = '1'
-$testFiles = Get-ChildItem test -Filter '*.test.mjs' | ForEach-Object FullName
-node --test --test-concurrency=1 --test-timeout=30000 --test-skip-pattern="MCP stdio|local event endpoint" @testFiles
-Remove-Item Env:BYOK_TEST_IN_PROCESS
+npm.cmd test
+npm.cmd run test:portable
+npm.cmd run test:network
 ```
 
-This mode uses real SQLite, Git worktrees, subprocesses and in-memory MCP transports.
-The release adds CLI, lifecycle, patch round-trip and actual HTTP MCP tests.
-This execution environment returns EACCES for loopback connections. In-process
-results and GitHub Actions results must be assessed separately; skipped socket
-tests are not counted as passing. Authenticated inference remains a separate check.
-It excludes the two tests that require real provider/webhook sockets. Service request
-authentication is tested by invoking its handler; actual HTTP MCP connections and
-Windows task registration still need validation on a machine permitting them.
+Portable mode uses real SQLite, Git worktrees, subprocesses and MCP transports.
+Four socket-specific checks (three HTTP MCP tests and one webhook test) report
+explicit skips. Skips are not passes. Unexpected probe failures still fail the
+run rather than silently changing test mode.
+
+Network mode requires loopback permission and runs every test. It fails immediately
+with an actionable diagnostic when permission is denied. GitHub Actions uses this
+strict mode on Linux and Windows, without silently falling back to fixtures.
+Authenticated inference and Windows task registration remain separate checks;
+fixture results do not establish live model quality.
 
 The package includes a `forlan` CLI. From a clone use `node src/cli.mjs --help`,
 or the npm scripts above. `npm pack` creates the installable archive; it excludes
