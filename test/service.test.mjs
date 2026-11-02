@@ -36,6 +36,7 @@ test('background service authenticates health and metrics without exposing its t
     assert.equal((await request(app, '/unknown', auth)).status, 404);
     assert.equal((await request(app, '/mcp', auth)).status, 404);
     assert.equal((await request(app, '/mcp', auth, 'POST')).status, 415);
+    assert.equal((await request(app, '/mcp', { ...auth, 'content-length': '1000001', 'content-type': 'application/json' }, 'POST')).status, 413);
   } finally { await app.close(); await app.close(); await f.remove(); }
 });
 

@@ -40,6 +40,9 @@ export async function startService(config, { token, port = 8788 } = {}) {
       }
       let body;
       if (req.method === 'POST') {
+        if (Number(req.headers['content-length'] ?? 0) > 1000000) {
+          req.resume(); respond(res, 413, { error: 'Request exceeds 1 MB.' }); return;
+        }
         if (!req.headers['content-type']?.startsWith('application/json')) {
           req.resume(); respond(res, 415, { error: 'Use application/json.' }); return;
         }

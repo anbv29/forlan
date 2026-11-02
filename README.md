@@ -1,4 +1,7 @@
-# BYOK Agent MCP
+# Forlan
+
+Local coding-agent orchestration through MCP. Version 1.0.0 supplies a CLI,
+33 tools, human approval checkpoints, and isolated Git worktrees.
 
 See [QUICKSTART.md](QUICKSTART.md) for Windows/Codex setup, registration,
 usage examples and diagnostics. The server exposes 33 tools, the `byok://guide`
@@ -348,16 +351,14 @@ Remove-Item Env:BYOK_TEST_IN_PROCESS
 ```
 
 This mode uses real SQLite, Git worktrees, subprocesses and in-memory MCP transports.
-Current validation passed 60 distinct behavior tests across the combined run and
-targeted follow-up runs. Two real-socket tests were excluded because loopback
-connections returned EACCES in the execution environment. Syntax checks also passed.
+The release adds CLI, lifecycle, patch round-trip and actual HTTP MCP tests.
+This execution environment returns EACCES for loopback connections. In-process
+results and GitHub Actions results must be assessed separately; skipped socket
+tests are not counted as passing. Authenticated inference remains a separate check.
 It excludes the two tests that require real provider/webhook sockets. Service request
 authentication is tested by invoking its handler; actual HTTP MCP connections and
 Windows task registration still need validation on a machine permitting them.
 
-This session blocks writes to the default .git directory. Actual commits are in
-work/byok-history. Inspect them with ./scripts/git.ps1 log --oneline.
-The source package includes a Git bundle for restoring ordinary repository history:
-git clone byok-agent-mcp.bundle byok-agent-mcp
-Implementation commits contain 100–140 changed JavaScript lines.
-Generated lockfiles and documentation have separate line counts.
+The package includes a `forlan` CLI. From a clone use `node src/cli.mjs --help`,
+or the npm scripts above. `npm pack` creates the installable archive; it excludes
+local configuration, credentials, task databases and worktree history.

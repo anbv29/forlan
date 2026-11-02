@@ -1,132 +1,95 @@
-# Use BYOK Agent MCP with Codex
+# Use Forlan with Codex
 
-This version lives in `C:\Users\anubh\Downloads\alanAI`. The Desktop project was
-used as its starting source and has not been modified. No commits or pushes were made.
+Forlan coordinates coding agents through MCP in isolated Git worktrees. It runs
+locally through your existing MCP client, without a separate desktop application.
+Requires Node.js 24+, Git, and a target repository with a committed HEAD.
 
-## Connect
+## Install and connect
 
-Open a normal PowerShell terminal and run:
+Clone the repository and open its folder in PowerShell. In this workspace that
+folder is `C:\Users\anubh\Desktop\new-chat-5`. Run:
 
 ```powershell
-Set-Location C:\Users\anubh\Downloads\alanAI
-npm.cmd run setup -- --register
+npm.cmd ci
+npm.cmd run setup -- --repository C:\path\to\your\project --register
+npm.cmd run doctor
+npm.cmd run smoke
 codex.cmd mcp get byok-agent
 ```
 
-Setup preserves the existing `config.local.json`. It registers the absolute Node
-executable, server entry point and configuration path with Codex. Restart Codex
-or open a new Codex session after registration. In Codex CLI, `/mcp` shows server
-status. The currently running chat cannot hot-load the new tools.
+Setup creates `config.local.json` and registers absolute paths with Codex. Existing
+configuration is preserved. Restart Codex after registration; the current chat
+cannot hot-load new MCP tools. In Codex CLI, `/mcp` shows connection status.
 
-The registration attempt inside the build session failed because it could not
-write `C:\Users\anubh\.codex\config.toml`. The command above is the remaining step
-to run from your own terminal. It does not need an administrator terminal.
+Sign in with `codex.cmd login` before model tasks. Setup detects the standard
+Windows npm installation; other installations can pass `--codex-entry` with the
+absolute path to `codex.js`. If registration is denied in this session, run it
+from your own normal terminal. Administrator access is not required.
 
-For a fresh installation, first run `npm.cmd ci`, then:
+The default profiles are `codex` and a read-only `reviewer`, with approval
+checkpoints enabled. Set `checks` to commands appropriate for your repository,
+for example `[["node", "--test"]]`. Empty checks never count as passed tests.
+State defaults to `.byok-agent-mcp` in your user home and must stay outside every
+configured repository. Preserve that directory to retain task history.
 
-```powershell
-npm.cmd run setup -- --repository C:\path\to\your\committed-repository --register
-```
+## BYOK and other clients
 
-The setup command detects the usual Windows npm installation of Codex. If yours
-is elsewhere, pass `--codex-entry C:\absolute\path\to\codex.js`.
+For an OpenAI-compatible provider, copy `config.example.json` to `config.local.json`
+and set repository/state paths, baseUrl, model and verification commands. Supply
+BYOK_API_KEY through the MCP client's environment or secret settings. Never put
+keys in configuration files, task goals or chat. ChatGPT subscriptions do not
+provide BYOK API credits; CLI agents can use their own configured sign-in.
 
-## Current configuration
-
-- Allowed repository: `C:\Users\anubh\Desktop\new-chat-5`.
-- Editing agent: `codex`; read-only review agent: `reviewer`.
-- Credentials: the Codex CLI's existing sign-in. No provider key was created or saved.
-- Approval checkpoints: enabled. Parallelism: at most two active operations.
-- State and worktrees: `C:\Users\anubh\Downloads\alanAI\.agent-state`.
-- Verification: `node scripts/check.mjs`, which checks JavaScript syntax only.
-  This is not the full test suite. Add appropriate checks before relying on validation.
-
-To work on another project, edit the `repositories` array in `config.local.json`
-and restart the MCP connection. Use full Git root paths with a committed HEAD.
-Uncommitted changes in the source checkout are not copied into task worktrees.
-The state directory must be outside every allowed repository. If you add this
-Downloads project as a target, move stateDir outside it first.
+Other stdio MCP clients should launch Node with the absolute `src/server.mjs`
+path and set BYOK_CONFIG to the absolute configuration path. Form elicitation is
+required to approve work. README.md covers HTTP mode and background execution.
 
 ## Ask Codex to use it
 
-Start with this prompt:
+Start with:
 
 > Use byok-agent MCP. Read get_usage_guide and get_configuration, then list_agents.
-> Tell me which repository and runners are configured. Do not start a model task yet.
+> Tell me which repository, agents and checks are configured. Do not start coding yet.
 
-Then use a bounded implementation prompt:
+Then give it a bounded task:
 
-> Use byok-agent MCP to start a task in C:\Users\anubh\Desktop\new-chat-5.
-> Add a test for one missing edge case in the task cancellation flow.
-> Use agents ["codex", "reviewer"]. Poll its status, request my approval at each
-> checkpoint, and show me the final diff, new files and verification results.
-> Do not commit or push.
+> Use byok-agent MCP to add [specific change] in [configured repository].
+> Use agents ["codex", "reviewer"]. Request my approval at each checkpoint.
+> Monitor the existing task, run configured checks, and show the final diff,
+> new files and verification failures. Do not commit or push.
 
-MCP starts work asynchronously and immediately returns a task ID. Codex should
-poll `get_task_status` or `get_task_events`, then use `review_checkpoint` when
-the task is `awaiting_approval`. The client must support MCP form elicitation.
-If a client cannot display forms, paused tasks can still be inspected/cancelled;
-they cannot be approved through a plain chat message or tool argument.
+Tasks return an ID immediately. Poll get_task_status/get_task_events and use
+review_checkpoint when paused. Approval comes from a human form, never a boolean
+tool argument. Clients without form support can inspect and cancel paused work.
 
-For a larger goal:
+For larger goals use plan_project, review_project_plan and integrate_project.
+Context tools provide searchable repository notes. Automations start as disabled
+drafts and require approval; enabled automations still honor stage checkpoints.
 
-> Use plan_project to propose a dependency graph for [goal]. Show me the plan,
-> ask for approval through review_project_plan, and monitor its tasks. Once
-> complete, ask before integrate_project, then show the combined candidate diff.
+## Review and apply changes
 
-For project memory:
-
-> Index the configured repository. Remember that implementation must not commit
-> or push, then search its context for cancellation and recovery.
-
-For automation:
-
-> Create a disabled daily automation draft for 10:00 Asia/Kolkata to review
-> the configured repository for cancellation regressions with the reviewer agent.
-> Show the definition and request approval with review_automation before enabling it.
-
-Automation runs locally while the worker is running. By default each future task
-still pauses for stage approval. Unattended execution requires the owner to
-explicitly change requireApproval; enabling a schedule does not change it.
-Use the background worker in README.md if schedules must survive client disconnects.
-Do not run stdio and background workers against the same state directory together.
-
-## Review and take changes back
-
-Tasks edit isolated Git worktrees. They do not modify the original checkout.
-Use `get_task_diff`, `read_task_file`, and `run_checks`. `export_task_patch`
-returns a Git patch with tracked edits/deletions and new UTF-8 files, up to 150 KB.
-Restricted paths and unsupported new binary/large files are rejected. Review and
-save the patch as UTF-8, then apply it only when you want those changes:
+The original checkout stays untouched. Read get_task_diff, read_task_file and
+check results. export_task_patch includes tracked edits, deletions and new UTF-8
+files. Review and save it as UTF-8 before applying to the original checkout:
 
 ```powershell
-Set-Location C:\Users\anubh\Desktop\new-chat-5
 git apply --check C:\path\to\reviewed.patch
 git apply C:\path\to\reviewed.patch
 ```
 
-No automatic commit, push or merge is performed. Conflicting project branches
-can be handled with get_conflict_details, submit_conflict_resolutions or
-resolve_project_conflicts, with human approval and a separate candidate worktree.
+No automatic commit or push occurs. Conflicts support approved agent assistance
+or explicit contents/deletion decisions. Failed candidates remain separate.
+Interrupted work needs explicit recovery; unfinished stages start fresh calls.
 
-## Diagnose
+## CLI and verification
 
-```powershell
-Set-Location C:\Users\anubh\Downloads\alanAI
-npm.cmd run doctor
-npm.cmd run smoke
-npm.cmd run check
-npm.cmd test -- --test-timeout=30000
-```
+The package supplies `forlan start`, `service`, `setup`, `doctor` and `smoke`.
+From a clone, `node src/cli.mjs --help` shows commands. Use
+`node src/cli.mjs --config C:\path\config.json doctor` to select a configuration.
 
-Doctor checks Node, committed repository roots and CLI availability. Smoke starts
-a real stdio MCP connection, lists tools/resources/prompts, reads configuration,
-and exits. Neither spends model credits or starts coding work. Stop an existing
-server before smoke if it owns the same state directory.
-
-Actual authenticated inference is separate from transport tests. A Codex sign-in
-must already work (`codex.cmd login status`). BYOK profiles instead need their
-own provider credentials and API credits; a ChatGPT subscription is not an API key.
-
-If you move this folder, rerun setup with --register and update the absolute
-stateDir/configuration paths. Keep the same state directory to retain task history.
+Run `npm.cmd run check` and `npm.cmd test` for the complete suite. GitHub Actions
+runs it on Linux and Windows, including actual HTTP MCP sessions and webhooks.
+Doctor and smoke spend no model credits. Fixture tests do not prove live model
+quality. This build session restricts loopback connections and some user state
+folders, so local socket and authenticated inference validation is incomplete.
+README.md explains the explicit in-process test mode and background setup.
