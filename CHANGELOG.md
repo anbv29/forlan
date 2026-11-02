@@ -2,6 +2,8 @@
 
 ## 1.0.1
 
+- Use Forlan consistently for package identity, MCP registration, configuration and state paths.
+- Configuration variables use FORLAN_ and the guide resource is forlan://guide.
 - Run HTTP session, approval, reconnect and webhook tests in portable mode without skips.
 - Exercise production HTTP handlers through Node's parser and in-memory byte streams.
 - Verify request parsing and streaming cancellation independently of the MCP workflow.

@@ -45,7 +45,7 @@ test('CLI configuration flag routes setup doctor and a real stdio smoke connecti
     assert.equal(connection.server.version, JSON.parse(await readFile(resolve('package.json'), 'utf8')).version);
     assert.equal(connection.inferenceUsed, false);
     assert.ok(connection.toolCount >= 33);
-    assert.ok(connection.resources.includes('byok://guide'));
+    assert.ok(connection.resources.includes('forlan://guide'));
     assert.ok(connection.prompts.includes('implement-change'));
   } finally { await f.remove(); }
 });

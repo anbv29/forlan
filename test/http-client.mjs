@@ -27,7 +27,7 @@ function connectionPair() {
 }
 
 export function httpFetch(server) {
-  if (process.env.BYOK_TEST_IN_PROCESS !== '1') return globalThis.fetch.bind(globalThis);
+  if (process.env.FORLAN_TEST_IN_PROCESS !== '1') return globalThis.fetch.bind(globalThis);
   const agent = new Agent({ keepAlive: false });
   agent.createConnection = () => {
     const pair = connectionPair();

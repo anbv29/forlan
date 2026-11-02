@@ -2,8 +2,8 @@ import { readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-const directory = process.env.BYOK_TEST_PROVIDER_DIR;
-const endpoint = process.env.BYOK_TEST_PROVIDER_URL;
+const directory = process.env.FORLAN_TEST_PROVIDER_DIR;
+const endpoint = process.env.FORLAN_TEST_PROVIDER_URL;
 if (!directory || !isAbsolute(directory) || !endpoint) throw new Error('Inference fixture configuration is missing.');
 
 globalThis.fetch = async (url, options) => {

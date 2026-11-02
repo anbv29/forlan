@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const usageGuide = `BYOK Agent MCP is a local coding orchestrator.
+export const usageGuide = `Forlan is a local coding orchestrator.
 1. Call get_configuration and list_agents to discover allowed repositories and runners.
 2. Use start_task for a bounded change, or plan_project for a dependency graph.
 3. Poll get_task_status/get_task_events; do not start another task just to poll.
@@ -19,14 +19,14 @@ Consumer chat subscriptions do not provide BYOK API credits; CLI profiles can us
 their own configured sign-in. Changes are based on committed HEAD only.`;
 
 export function registerDiscovery(server, register, runtime) {
-  server.registerResource('usage', 'byok://guide', {
+  server.registerResource('usage', 'forlan://guide', {
     description: 'Local workflow, approvals, review and automation guide', mimeType: 'text/plain'
   }, async uri => ({ contents: [{ uri: uri.href, text: usageGuide, mimeType: 'text/plain' }] }));
   server.registerPrompt('implement-change', {
     description: 'Run and review a bounded coding change in an isolated worktree',
     argsSchema: { repository: z.string(), goal: z.string() }
   }, ({ repository, goal }) => ({ messages: [{ role: 'user', content: { type: 'text',
-    text: `Use BYOK Agent MCP to implement this goal in ${JSON.stringify(repository)}:\n${goal}\n\n` + usageGuide
+    text: `Use Forlan to implement this goal in ${JSON.stringify(repository)}:\n${goal}\n\n` + usageGuide
   } }] }));
   register('get_usage_guide', 'Read the supported workflow and limitations without running models.',
     {}, () => ({ guide: usageGuide }), true);

@@ -5,7 +5,7 @@
   "stateDir": "C:/absolute/path/outside/repositories/byok-state",
   "baseUrl": "https://your-provider.example/v1",
   "model": "your-tool-capable-model",
-  "apiKeyEnv": "BYOK_API_KEY",
+  "apiKeyEnv": "FORLAN_API_KEY",
   "requireApproval": true,
   "defaultAgent": "byok",
   "maxSteps": 20,

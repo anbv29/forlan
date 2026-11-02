@@ -4,7 +4,7 @@ Local coding-agent orchestration through MCP. Version 1.0.1 supplies a CLI,
 33 tools, human approval checkpoints, and isolated Git worktrees.
 
 See [QUICKSTART.md](QUICKSTART.md) for Windows/Codex setup, registration,
-usage examples and diagnostics. The server exposes 33 tools, the `byok://guide`
+usage examples and diagnostics. The server exposes 33 tools, the `forlan://guide`
 resource, and the `implement-change` prompt.
 
 Local coding tasks through MCP using your own inference credentials.
@@ -20,7 +20,7 @@ Requires Node.js 24+, Git, a committed repository and a compatible MCP client.
 4. Set baseUrl to an OpenAI-compatible API prefix, including /v1 when required.
 5. Select a function-calling model. The server appends /chat/completions.
 6. Configure the client to launch node with the absolute path to src/server.mjs.
-7. Pass BYOK_CONFIG (absolute config path) and BYOK_API_KEY through client environment settings.
+7. Pass FORLAN_CONFIG (absolute config path) and FORLAN_API_KEY through client environment settings.
 
 Keep API keys in client-managed secrets or inherited environment variables.
 Do not paste keys into chat, task goals or tool arguments.
@@ -34,16 +34,16 @@ Example client configuration; adapt the surrounding structure to your client:
 ```json
 {
   "mcpServers": {
-    "byok-agent": {
+    "forlan": {
       "command": "node",
       "args": ["C:/absolute/path/to/project/src/server.mjs"],
-      "env": { "BYOK_CONFIG": "C:/absolute/path/to/config.local.json" }
+      "env": { "FORLAN_CONFIG": "C:/absolute/path/to/config.local.json" }
     }
   }
 }
 ```
 
-Supply BYOK_API_KEY separately using your client's secret/environment support.
+Supply FORLAN_API_KEY separately using your client's secret/environment support.
 
 ## Planned parallel projects
 
@@ -294,9 +294,9 @@ checks and remain available for review. Unconfigured checks never imply success.
 
 ## Background worker
 
-Set BYOK_CONFIG to an absolute config path and BYOK_SERVICE_TOKEN to a random secret
+Set FORLAN_CONFIG to an absolute config path and FORLAN_SERVICE_TOKEN to a random secret
 of at least 32 characters, then run node src/service.mjs. The optional
-BYOK_SERVICE_PORT defaults to 8788. Connect a Streamable HTTP MCP client to
+FORLAN_SERVICE_PORT defaults to 8788. Connect a Streamable HTTP MCP client to
 http://127.0.0.1:8788/mcp with Authorization: Bearer followed by the token.
 Clients share one runtime and state directory. Disconnecting or deleting a session
 does not stop the worker or its schedules. Form-capable clients can approve work.

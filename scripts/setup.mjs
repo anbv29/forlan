@@ -26,7 +26,7 @@ export async function setup(args = process.argv.slice(2)) {
   if (!existsSync(configPath)) {
     if (!values['--repository']) throw new Error('Pass --repository with the absolute path to a committed Git repository.');
     const repository = await realpath(resolve(values['--repository']));
-    const stateDir = resolve(values['--state-dir'] ?? join(homedir(), '.byok-agent-mcp'));
+    const stateDir = resolve(values['--state-dir'] ?? join(homedir(), '.forlan'));
     const raw = { repositories: [repository], stateDir, requireApproval: true,
       defaultAgent: 'codex', maxConcurrent: 2, maxSteps: 20, agentTimeoutMs: 600000,
       agents: { codex: { kind: 'codex', command: [process.execPath, codexEntry] },
@@ -36,8 +36,8 @@ export async function setup(args = process.argv.slice(2)) {
     if (contained(repository, stateDir)) throw new Error('stateDir must be outside repositories.');
     await writeFile(configPath, JSON.stringify(raw, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
   }
-  loadConfig({ ...process.env, BYOK_CONFIG: configPath });
-  const registration = ['mcp', 'add', 'byok-agent', '--env', 'BYOK_CONFIG=' + configPath,
+  loadConfig({ ...process.env, FORLAN_CONFIG: configPath });
+  const registration = ['mcp', 'add', 'forlan', '--env', 'FORLAN_CONFIG=' + configPath,
     '--', process.execPath, join(projectRoot, 'src', 'server.mjs')];
   if (values['--register']) {
     const result = await command(process.execPath, [codexEntry, ...registration], projectRoot);

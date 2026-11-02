@@ -9,7 +9,7 @@ import { loadConfig } from './core.mjs';
 import { monitoring } from './monitoring.mjs';
 
 export async function startService(config, { token, port = 8788 } = {}) {
-  if (typeof token !== 'string' || token.length < 32) throw new Error('Set BYOK_SERVICE_TOKEN to at least 32 characters.');
+  if (typeof token !== 'string' || token.length < 32) throw new Error('Set FORLAN_SERVICE_TOKEN to at least 32 characters.');
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid service port.');
   config = { ...config, secrets: [...(config.secrets ?? [config.apiKey]).filter(Boolean), token] };
   const runtime = new Runtime(config);
@@ -95,9 +95,9 @@ export async function startService(config, { token, port = 8788 } = {}) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const app = await startService(loadConfig(), { token: process.env.BYOK_SERVICE_TOKEN,
-      port: Number(process.env.BYOK_SERVICE_PORT ?? 8788) });
-    console.error('BYOK background service listening at ' + app.url);
+    const app = await startService(loadConfig(), { token: process.env.FORLAN_SERVICE_TOKEN,
+      port: Number(process.env.FORLAN_SERVICE_PORT ?? 8788) });
+    console.error('Forlan background service listening at ' + app.url);
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void app.close(); });
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

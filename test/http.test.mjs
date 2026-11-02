@@ -28,7 +28,7 @@ test('HTTP MCP initializes discovers tools and reconnects without losing paused 
     const initialSession = transport.sessionId;
     assert.ok((await client.listPrompts()).prompts.some(prompt => prompt.name === 'implement-change'));
     assert.ok(tools.tools.some(tool => tool.name === 'start_task'));
-    assert.ok((await client.listResources()).resources.some(resource => resource.uri === 'byok://guide'));
+    assert.ok((await client.listResources()).resources.some(resource => resource.uri === 'forlan://guide'));
     const result = await client.callTool({ name: 'start_task', arguments: { repository: f.repository, goal: 'Wait for approval' } });
     assert.ok(!result.isError, JSON.stringify(result));
     const task = JSON.parse(result.content[0].text);

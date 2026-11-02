@@ -12,8 +12,8 @@ export function contained(root, target) {
 }
 
 export function loadConfig(env = process.env) {
-  if (!env.BYOK_CONFIG || !isAbsolute(env.BYOK_CONFIG)) throw new Error('Set BYOK_CONFIG to an absolute configuration path.');
-  const raw = JSON.parse(readFileSync(env.BYOK_CONFIG, 'utf8'));
+  if (!env.FORLAN_CONFIG || !isAbsolute(env.FORLAN_CONFIG)) throw new Error('Set FORLAN_CONFIG to an absolute configuration path.');
+  const raw = JSON.parse(readFileSync(env.FORLAN_CONFIG, 'utf8'));
   const profiles = normalizeAgents(raw, env);
   const automationWebhook = webhookConfig(raw.automationWebhook, env);
   const needsByok = Object.values(profiles.agents).some(p => p.kind === 'byok');
@@ -27,13 +27,13 @@ export function loadConfig(env = process.env) {
     if (typeof path !== 'string' || !isAbsolute(path)) throw new Error('Repository paths must be absolute.');
     return realpathSync(path);
   });
-  const apiKeyEnv = raw.apiKeyEnv ?? 'BYOK_API_KEY';
+  const apiKeyEnv = raw.apiKeyEnv ?? 'FORLAN_API_KEY';
   if (typeof apiKeyEnv !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(apiKeyEnv)) throw new Error('Invalid apiKeyEnv.');
   const apiKey = env[apiKeyEnv];
   if (needsByok && !local && !apiKey && Object.values(profiles.agents).some(p => p.kind === 'byok' && !p.apiKey)) throw new Error('Set the configured API key environment variable.');
   const checks = raw.checks ?? [];
   if (!Array.isArray(checks) || checks.some(c => !Array.isArray(c) || !c.length || c.some(a => typeof a !== 'string' || !a))) throw new Error('checks must contain command argument arrays.');
-  const stateDir = resolve(raw.stateDir ?? join(homedir(), '.byok-agent-mcp'));
+  const stateDir = resolve(raw.stateDir ?? join(homedir(), '.forlan'));
   if (repositories.some(root => contained(root, stateDir))) throw new Error('stateDir must be outside repositories.');
   const maxSteps = raw.maxSteps ?? 20;
   const maxConcurrent = raw.maxConcurrent ?? 2;

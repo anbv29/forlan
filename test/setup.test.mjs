@@ -16,13 +16,13 @@ test('setup creates a valid CLI-only config and preserves existing owner setting
       '--state-dir', join(f.directory, 'state'), '--codex-entry', entry];
     const result = await command(process.execPath, args, resolve('.'));
     assert.equal(result.code, 0, result.output);
-    const config = loadConfig({ BYOK_CONFIG: configPath });
+    const config = loadConfig({ FORLAN_CONFIG: configPath });
     assert.equal(config.defaultAgent, 'codex');
     assert.equal(config.requireApproval, true);
     assert.equal(config.agents.reviewer.readOnly, true);
     const report = JSON.parse(result.stdout);
     assert.equal(report.registered, false);
-    assert.ok(report.args.includes('BYOK_CONFIG=' + configPath));
+    assert.ok(report.args.includes('FORLAN_CONFIG=' + configPath));
     const original = await readFile(configPath, 'utf8');
     const second = await command(process.execPath, args, resolve('.'));
     assert.equal(second.code, 0, second.output);

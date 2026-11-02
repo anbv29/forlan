@@ -19,7 +19,7 @@ import { Runtime } from './runtime.mjs';
 export function createServer(config, options = {}) {
   const runtime = options.runtime ?? new Runtime(config);
   const metadata = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const server = new McpServer({ name: 'byok-agent-mcp', version: metadata.version });
+  const server = new McpServer({ name: 'forlan', version: metadata.version });
   const id = { taskId: z.string().uuid() };
   const register = (name, description, inputSchema, handler, readOnlyHint = false) => {
     server.registerTool(name, {
@@ -40,7 +40,7 @@ export function createServer(config, options = {}) {
     {}, () => ({ repositories: config.repositories, model: config.model,
       checks: config.checks, maxSteps: config.maxSteps, maxConcurrent: config.maxConcurrent, requireApproval: config.requireApproval ?? false, agents: agentCatalog(config), automations: runtime.automations.health() }), true);
 
-  register('start_task', 'Start a BYOK coding task in a new Git worktree. Returns immediately. ' +
+  register('start_task', 'Start a Forlan coding task in a new Git worktree. Returns immediately. ' +
     'Sends repository files to the configured inference endpoint. Changes require human review.',
     { repository: z.string().min(1), goal: z.string().trim().min(1).max(20000), agents: z.array(z.string()).min(1).max(8).optional() },
     ({ repository, goal, agents }) => runtime.start(repository, goal, agents));

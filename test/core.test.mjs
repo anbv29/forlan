@@ -11,7 +11,7 @@ import { httpFetch } from './http-client.mjs';
 
 export async function fixture() {
   await mkdir(resolve('work'), { recursive: true });
-  const directory = await mkdtemp(resolve('work/byok-mcp-test-'));
+  const directory = await mkdtemp(resolve('work/forlan-mcp-test-'));
   const repository = join(directory, 'repository');
   await mkdir(repository);
   await writeFile(join(repository, 'answer.txt'), 'before');
@@ -32,19 +32,19 @@ test('configuration enforces HTTPS, explicit roots and environment-only keys', a
     const base = { repositories: [f.repository], model: 'test-model',
       baseUrl: 'https://example.invalid/v1', stateDir: join(f.directory, 'state') };
     await writeFile(path, JSON.stringify(base));
-    assert.throws(() => loadConfig({ BYOK_CONFIG: path }), /API key/);
-    const config = loadConfig({ BYOK_CONFIG: path, BYOK_API_KEY: 'fake-secret' });
+    assert.throws(() => loadConfig({ FORLAN_CONFIG: path }), /API key/);
+    const config = loadConfig({ FORLAN_CONFIG: path, FORLAN_API_KEY: 'fake-secret' });
     assert.equal(config.apiKey, 'fake-secret');
     await writeFile(path, JSON.stringify({ ...base, baseUrl: 'http://example.invalid' }));
-    assert.throws(() => loadConfig({ BYOK_CONFIG: path, BYOK_API_KEY: 'fake-secret' }), /HTTPS/);
+    assert.throws(() => loadConfig({ FORLAN_CONFIG: path, FORLAN_API_KEY: 'fake-secret' }), /HTTPS/);
     await writeFile(path, JSON.stringify({ ...base, stateDir: join(f.repository, 'state') }));
-    assert.throws(() => loadConfig({ BYOK_CONFIG: path, BYOK_API_KEY: 'fake-secret' }), /outside/);
+    assert.throws(() => loadConfig({ FORLAN_CONFIG: path, FORLAN_API_KEY: 'fake-secret' }), /outside/);
     for (const path of ['../escape', '.git/config', '.env', '.ENV.local']) {
       await assert.rejects(safePath(f.repository, path, true));
     }
-    process.env.BYOK_TEST_SECRET = 'never-in-children';
-    assert.equal(commandEnv().BYOK_TEST_SECRET, undefined);
-    delete process.env.BYOK_TEST_SECRET;
+    process.env.FORLAN_TEST_SECRET = 'never-in-children';
+    assert.equal(commandEnv().FORLAN_TEST_SECRET, undefined);
+    delete process.env.FORLAN_TEST_SECRET;
   } finally { await f.remove(); }
 });
 
@@ -67,7 +67,7 @@ test('SQLite preserves task state and event cursors across reopen', async () => 
 });
 
 export async function mockProvider(handler) {
-  if (process.env.BYOK_TEST_IN_PROCESS === '1') return (await import('./inprocess-provider.mjs')).inProcessProvider(handler);
+  if (process.env.FORLAN_TEST_IN_PROCESS === '1') return (await import('./inprocess-provider.mjs')).inProcessProvider(handler);
   const server = createServer(async (req, res) => {
     let input = '';
     for await (const chunk of req) input += chunk;
@@ -149,7 +149,7 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
     client = new Client({ name: 'integration-test', version: '1.0.0' });
     const transport = new StdioClientTransport({
       command: process.execPath, args: [...(fixtureTransport?.args ?? []), resolve('src/server.mjs')],
-      env: { ...commandEnv(), ...fixtureTransport?.env, BYOK_CONFIG: configPath, BYOK_API_KEY: 'integration-fake-key' },
+      env: { ...commandEnv(), ...fixtureTransport?.env, FORLAN_CONFIG: configPath, FORLAN_API_KEY: 'integration-fake-key' },
       stderr: 'pipe'
     });
     let diagnostics = '';
@@ -438,7 +438,7 @@ test('CLI-only configuration does not require BYOK inference settings', async ()
       stateDir: join(f.directory, 'state'), agents: {
         coder: { kind: 'codex', command: [process.execPath], apiKeyEnv: 'TEST_CODEX_KEY' }
       } }));
-    const config = loadConfig({ BYOK_CONFIG: path, TEST_CODEX_KEY: 'fake-codex-key' });
+    const config = loadConfig({ FORLAN_CONFIG: path, TEST_CODEX_KEY: 'fake-codex-key' });
     assert.equal(config.defaultAgent, 'coder');
     assert.deepEqual(config.secrets, ['fake-codex-key']);
     assert.equal(config.agents.coder.apiKey, 'fake-codex-key');
@@ -1032,7 +1032,7 @@ test('overlapping conflict resolution needs human approval and produces a verifi
       assert.match(body.messages.at(-1).content, /approved conflict set/);
       reply(res, { tool_calls: [call('read_file', { path: 'answer.txt' })] });
     } else if (calls === 3) {
-      assert.match(body.messages.at(-1).content, /BYOK_OURS/);
+      assert.match(body.messages.at(-1).content, /FORLAN_OURS/);
       reply(res, { tool_calls: [call('write_file', { path: 'answer.txt', content: 'resolved both intents' })] });
     } else reply(res, { content: 'Resolved both task versions; review the combined intent.' });
   });
@@ -1128,7 +1128,7 @@ test('resolver cannot claim success while conflict markers remain', async () => 
     const failed = await waitTask(runtime, project.id);
     assert.equal(failed.status, 'integration_conflict');
     assert.match(failed.error, /conflict markers/);
-    assert.match(await readFile(join(failed.failedResolutionCandidate.workspace, 'answer.txt'), 'utf8'), /BYOK_OURS/);
+    assert.match(await readFile(join(failed.failedResolutionCandidate.workspace, 'answer.txt'), 'utf8'), /FORLAN_OURS/);
     assert.equal(await readFile(join(f.repository, 'answer.txt'), 'utf8'), 'before');
   } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });

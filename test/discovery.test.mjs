@@ -49,8 +49,8 @@ test('MCP clients discover the guide and workflow prompt and reject invalid expo
   const pair = InMemoryTransport.createLinkedPair();
   try {
     await Promise.all([app.server.connect(pair[0]), client.connect(pair[1])]);
-    assert.ok((await client.listResources()).resources.some(r => r.uri === 'byok://guide'));
-    assert.match((await client.readResource({ uri: 'byok://guide' })).contents[0].text, /review_checkpoint/);
+    assert.ok((await client.listResources()).resources.some(r => r.uri === 'forlan://guide'));
+    assert.match((await client.readResource({ uri: 'forlan://guide' })).contents[0].text, /review_checkpoint/);
     const prompt = await client.getPrompt({ name: 'implement-change', arguments: { repository: f.repository, goal: 'Fix bug' } });
     assert.match(prompt.messages[0].content.text, /Fix bug/);
     const task = app.runtime.store.create(f.repository, 'No worktree');
@@ -67,7 +67,7 @@ test('doctor verifies committed roots without running models and warns about mis
     assert.match(report.warnings[0], /No verification/);
     const invalid = await diagnose({ ...f.config, repositories: [f.directory], agents: {} });
     assert.equal(invalid.ok, false);
-    assert.ok(cliArguments({ kind: 'codex' }, {}).includes('mcp_servers.byok-agent.enabled=false'));
+    assert.ok(cliArguments({ kind: 'codex' }, {}).includes('mcp_servers.forlan.enabled=false'));
   } finally { await f.remove(); }
 });
 

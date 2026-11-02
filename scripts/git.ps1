@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$history = Join-Path $projectRoot 'work/byok-history'
+$history = Join-Path $projectRoot 'work/forlan-history'
 if (-not (Test-Path -LiteralPath $history)) {
     throw 'Alternate Git history is unavailable. Restore the supplied Git bundle.'
 }

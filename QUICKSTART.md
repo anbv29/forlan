@@ -7,7 +7,7 @@ Requires Node.js 24+, Git, and a target repository with a committed HEAD.
 For the downloadable npm archive, run:
 
 ```powershell
-npm.cmd install --global .\byok-agent-mcp-1.0.1.tgz
+npm.cmd install --global .\forlan-1.0.1.tgz
 forlan setup --repository C:\path\to\your\project --register
 ```
 
@@ -23,12 +23,17 @@ npm.cmd ci
 npm.cmd run setup -- --repository C:\path\to\your\project --register
 npm.cmd run doctor
 npm.cmd run smoke
-codex.cmd mcp get byok-agent
+codex.cmd mcp get forlan
 ```
 
 Setup creates `config.local.json` and registers absolute paths with Codex. Existing
 configuration is preserved. Restart Codex after registration; the current chat
 cannot hot-load new MCP tools. In Codex CLI, `/mcp` shows connection status.
+
+When updating an existing installation, remove its previous MCP registration and
+rerun setup with `--register`. The new registration is named `forlan` and passes
+`FORLAN_CONFIG`. If an earlier archive is installed globally, uninstall that
+package before installing this one, since both expose the same `forlan` command.
 
 Sign in with `codex.cmd login` before model tasks. Setup detects the standard
 Windows npm installation; other installations can pass `--codex-entry` with the
@@ -38,31 +43,31 @@ from your own normal terminal. Administrator access is not required.
 The default profiles are `codex` and a read-only `reviewer`, with approval
 checkpoints enabled. Set `checks` to commands appropriate for your repository,
 for example `[["node", "--test"]]`. Empty checks never count as passed tests.
-State defaults to `.byok-agent-mcp` in your user home and must stay outside every
+State defaults to `.forlan` in your user home and must stay outside every
 configured repository. Preserve that directory to retain task history.
 
 ## BYOK and other clients
 
 For an OpenAI-compatible provider, copy `config.example.json` to `config.local.json`
 and set repository/state paths, baseUrl, model and verification commands. Supply
-BYOK_API_KEY through the MCP client's environment or secret settings. Never put
+FORLAN_API_KEY through the MCP client's environment or secret settings. Never put
 keys in configuration files, task goals or chat. ChatGPT subscriptions do not
 provide BYOK API credits; CLI agents can use their own configured sign-in.
 
 Other stdio MCP clients should launch Node with the absolute `src/server.mjs`
-path and set BYOK_CONFIG to the absolute configuration path. Form elicitation is
+path and set FORLAN_CONFIG to the absolute configuration path. Form elicitation is
 required to approve work. README.md covers HTTP mode and background execution.
 
 ## Ask Codex to use it
 
 Start with:
 
-> Use byok-agent MCP. Read get_usage_guide and get_configuration, then list_agents.
+> Use forlan MCP. Read get_usage_guide and get_configuration, then list_agents.
 > Tell me which repository, agents and checks are configured. Do not start coding yet.
 
 Then give it a bounded task:
 
-> Use byok-agent MCP to add [specific change] in [configured repository].
+> Use forlan MCP to add [specific change] in [configured repository].
 > Use agents ["codex", "reviewer"]. Request my approval at each checkpoint.
 > Monitor the existing task, run configured checks, and show the final diff,
 > new files and verification failures. Do not commit or push.

@@ -3,7 +3,7 @@ param(
     [string]$Action = 'Status',
     [string]$ConfigPath,
     [ValidatePattern('^[a-zA-Z0-9 _]{1,80}$')]
-    [string]$TaskName = 'BYOK Agent MCP'
+    [string]$TaskName = 'Forlan'
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -24,7 +24,7 @@ if ($Action -eq 'Install') {
     $escapedEntry = $serviceEntry.Replace("'", "''")
     $launcherText = @"
 `$ErrorActionPreference = 'Stop'
-`$env:BYOK_CONFIG = '$escapedConfig'
+`$env:FORLAN_CONFIG = '$escapedConfig'
 & '$escapedNode' '$escapedEntry'
 exit `$LASTEXITCODE
 "@
@@ -38,7 +38,7 @@ exit `$LASTEXITCODE
         -MultipleInstances IgnoreNew -StartWhenAvailable
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
-        -Settings $settings -Principal $principal -Description 'Local BYOK MCP background worker' | Out-Null
+        -Settings $settings -Principal $principal -Description 'Local Forlan MCP background worker' | Out-Null
     Write-Output 'Installed. Set persistent provider and service token environment variables, then start the task.'
 } elseif ($Action -eq 'Start') {
     Start-ScheduledTask -TaskName $TaskName

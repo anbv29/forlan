@@ -70,7 +70,7 @@ export async function createWorktree(config, task, signal) {
   const base = (await git(['rev-parse', task.baseRef ?? 'HEAD'], root, signal)).trim();
   const workspace = join(config.stateDir, 'worktrees', task.id);
   await mkdir(dirname(workspace), { recursive: true });
-  const branch = 'byok/' + task.id;
+  const branch = 'forlan/' + task.id;
   await git(['worktree', 'add', '-b', branch, workspace, base], root, signal);
   return { workspace: await realpath(workspace), branch, base };
 }

@@ -44,7 +44,7 @@ export async function providerBridge(handler, baseUrl) {
   timer.unref();
   return {
     args: ['--import', pathToFileURL(resolve('test/provider-preload.mjs')).href],
-    env: { BYOK_TEST_PROVIDER_DIR: directory, BYOK_TEST_PROVIDER_URL: baseUrl },
+    env: { FORLAN_TEST_PROVIDER_DIR: directory, FORLAN_TEST_PROVIDER_URL: baseUrl },
     async close() {
       closed = true;
       clearInterval(timer);

@@ -19,7 +19,7 @@ export function stagePlan(config, names) {
 
 export function cliArguments(profile, config) {
   const model = profile.model ? ['--model', profile.model] : [];
-  if (profile.kind === 'codex') return ['exec', '--json', '-c', 'mcp_servers.byok-agent.enabled=false', '--sandbox', profile.readOnly ? 'read-only' : 'workspace-write', ...model, '-'];
+  if (profile.kind === 'codex') return ['exec', '--json', '-c', 'mcp_servers.forlan.enabled=false', '--sandbox', profile.readOnly ? 'read-only' : 'workspace-write', ...model, '-'];
   return ['-p', '--output-format', 'json', '--permission-mode', profile.readOnly ? 'plan' : 'acceptEdits',
     '--tools', profile.readOnly ? 'Read,Glob,Grep' : 'Read,Edit,Write,Glob,Grep', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
     '--max-turns', String(config.maxSteps), ...model];

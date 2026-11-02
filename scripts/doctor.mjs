@@ -33,7 +33,7 @@ export async function diagnose(config) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const config = loadConfig({ ...process.env, BYOK_CONFIG: process.env.BYOK_CONFIG ?? join(projectRoot, 'config.local.json') });
+    const config = loadConfig({ ...process.env, FORLAN_CONFIG: process.env.FORLAN_CONFIG ?? join(projectRoot, 'config.local.json') });
     const report = await diagnose(config);
     console.log(JSON.stringify(report, null, 2));
     if (!report.ok) process.exitCode = 1;

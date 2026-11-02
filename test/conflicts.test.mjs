@@ -40,7 +40,7 @@ test('failed agent candidates preserve the clean project and can be retried', as
     assert.match(failed.error, /markers/);
     assert.equal(failed.workspace, project.workspace);
     assert.notEqual(failed.failedResolutionCandidate.workspace, project.workspace);
-    assert.match(await readFile(join(failed.failedResolutionCandidate.workspace, 'answer.txt'), 'utf8'), /BYOK_OURS/);
+    assert.match(await readFile(join(failed.failedResolutionCandidate.workspace, 'answer.txt'), 'utf8'), /FORLAN_OURS/);
     assert.equal(await readFile(join(project.workspace, 'answer.txt'), 'utf8'), 'Original answer\n');
     assert.ok((await conflictDetails(runtime, project.id)).conflicts.length);
     beginResolution(runtime.projects, project.id);

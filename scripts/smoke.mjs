@@ -3,10 +3,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { projectRoot } from './setup.mjs';
 
-const client = new Client({ name: 'byok-connection-check', version: '1.0.0' });
+const client = new Client({ name: 'forlan-connection-check', version: '1.0.0' });
 const transport = new StdioClientTransport({ command: process.execPath,
   args: [join(projectRoot, 'src', 'server.mjs')], stderr: 'pipe',
-  env: { ...process.env, BYOK_CONFIG: process.env.BYOK_CONFIG ?? join(projectRoot, 'config.local.json') } });
+  env: { ...process.env, FORLAN_CONFIG: process.env.FORLAN_CONFIG ?? join(projectRoot, 'config.local.json') } });
 let diagnostics = '';
 transport.stderr?.on('data', data => { diagnostics = (diagnostics + data.toString()).slice(-4000); });
 try {

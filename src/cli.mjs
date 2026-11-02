@@ -24,7 +24,7 @@ const args = process.argv.slice(2);
 if (args[0] === '--config') {
   args.shift();
   if (!args[0] || args[0].startsWith('--')) { console.error('Provide a path after --config.'); process.exit(1); }
-  process.env.BYOK_CONFIG = resolve(args.shift());
+  process.env.FORLAN_CONFIG = resolve(args.shift());
 }
 const name = args.shift() ?? 'start';
 if (['--help', '-h', 'help'].includes(name)) process.stdout.write(help);
@@ -36,7 +36,7 @@ else {
     console.error('Unknown command: ' + name + '\nRun forlan --help for usage.');
     process.exitCode = 1;
   } else {
-    if (name === 'setup' && process.env.BYOK_CONFIG && !args.includes('--config')) args.unshift('--config', process.env.BYOK_CONFIG);
+    if (name === 'setup' && process.env.FORLAN_CONFIG && !args.includes('--config')) args.unshift('--config', process.env.FORLAN_CONFIG);
     const child = spawn(process.execPath, [fileURLToPath(new URL(entries[name], import.meta.url)), ...args],
       { stdio: 'inherit', windowsHide: true });
     const stop = () => child.kill();

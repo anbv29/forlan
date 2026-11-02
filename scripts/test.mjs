@@ -37,7 +37,7 @@ export async function runTests(args = process.argv.slice(2)) {
   const modes = args.filter(arg => ['--network', '--in-process'].includes(arg));
   if (modes.length > 1) throw new Error('Choose only one test mode.');
   const mode = modes[0] === '--network' ? 'network' : modes[0] === '--in-process' ||
-    process.env.BYOK_TEST_IN_PROCESS === '1' ? 'in-process' : 'auto';
+    process.env.FORLAN_TEST_IN_PROCESS === '1' ? 'in-process' : 'auto';
   const selected = await selectTestMode({ mode, ci: !!process.env.CI });
   console.error('Test mode: ' + selected.mode + ' (' + selected.reason + ').');
   if (selected.mode === 'in-process') console.error('All protocol checks run through memory connections. Physical TCP validation requires test:network.');
@@ -48,7 +48,7 @@ export async function runTests(args = process.argv.slice(2)) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--test', '--test-concurrency=1', '--test-timeout=30000', ...forwarded, ...files], {
       cwd: root, stdio: 'inherit', windowsHide: true,
-      env: { ...process.env, BYOK_TEST_IN_PROCESS: selected.mode === 'in-process' ? '1' : '0' }
+      env: { ...process.env, FORLAN_TEST_IN_PROCESS: selected.mode === 'in-process' ? '1' : '0' }
     });
     child.once('error', reject);
     child.once('exit', code => resolve(code ?? 1));
