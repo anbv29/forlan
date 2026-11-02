@@ -4,6 +4,7 @@ export function inProcessProvider(handler) {
   const original = globalThis.fetch;
   const baseUrl = 'http://127.0.0.1:1/fixture-' + (++sequence) + '/v1';
   const pending = new Set();
+  let bridge;
   globalThis.fetch = async (url, options) => {
     if (url !== baseUrl + '/chat/completions') return original(url, options);
     return new Promise((resolve, reject) => {
@@ -20,13 +21,18 @@ export function inProcessProvider(handler) {
         writeHead(code) { status = code; },
         end(body) { cleanup(); resolve(new Response(body, { status, headers })); }
       };
-      const request = { headers: Object.fromEntries(new Headers(options.headers)) };
+      const request = { url: '/v1/chat/completions', headers: Object.fromEntries(new Headers(options.headers)) };
       Promise.resolve().then(() => handler(request, response, JSON.parse(options.body)))
         .catch(error => { response.writeHead(500); response.end(error.message); });
     });
   };
-  return { baseUrl, async close() {
-    for (const abort of pending) abort();
-    globalThis.fetch = original;
-  } };
+  return { baseUrl,
+    async childTransport() {
+      bridge ??= await (await import('./provider-bridge.mjs')).providerBridge(handler, baseUrl);
+      return bridge;
+    }, async close() {
+      for (const abort of pending) abort();
+      globalThis.fetch = original;
+      await bridge?.close();
+    } };
 }

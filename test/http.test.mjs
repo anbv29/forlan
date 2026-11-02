@@ -6,7 +6,8 @@ import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { startService } from '../src/service.mjs';
 import { repositoryFixture, settled } from './helpers.mjs';
 
-const options = { skip: process.env.BYOK_TEST_IN_PROCESS === '1', timeout: 20000 };
+const options = { skip: process.env.BYOK_TEST_IN_PROCESS === '1' &&
+  'Loopback unavailable; run test:network on an unrestricted machine.', timeout: 20000 };
 
 test('HTTP MCP initializes discovers tools and reconnects without losing paused work', options, async () => {
   const f = await repositoryFixture();

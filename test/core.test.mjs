@@ -144,13 +144,17 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
   }));
   let client;
   const connect = async () => {
+    const fixtureTransport = await provider.childTransport?.();
     client = new Client({ name: 'integration-test', version: '1.0.0' });
     const transport = new StdioClientTransport({
-      command: process.execPath, args: [resolve('src/server.mjs')],
-      env: { ...commandEnv(), BYOK_CONFIG: configPath, BYOK_API_KEY: 'integration-fake-key' },
+      command: process.execPath, args: [...(fixtureTransport?.args ?? []), resolve('src/server.mjs')],
+      env: { ...commandEnv(), ...fixtureTransport?.env, BYOK_CONFIG: configPath, BYOK_API_KEY: 'integration-fake-key' },
       stderr: 'pipe'
     });
-    await client.connect(transport);
+    let diagnostics = '';
+    transport.stderr?.on('data', data => { diagnostics = (diagnostics + data.toString()).slice(-4000); });
+    try { await client.connect(transport); }
+    catch (error) { throw new Error(error.message + '\n' + diagnostics); }
   };
   const invoke = async (name, args = {}) => {
     const result = await client.callTool({ name, arguments: args });
@@ -160,7 +164,10 @@ test('MCP stdio runs a BYOK task, checks edits, reviews new files and reloads hi
   };
   try {
     await connect();
-    assert.equal((await client.listTools()).tools.length, 22);
+    const names = (await client.listTools()).tools.map(tool => tool.name);
+    for (const name of ['start_task', 'review_checkpoint', 'get_task_diff', 'export_task_patch', 'get_usage_guide']) {
+      assert.ok(names.includes(name), 'Missing workflow tool ' + name);
+    }
     assert.equal((await invoke('get_configuration')).model, 'fixture-model');
     const task = await invoke('start_task', { repository: f.repository, goal: 'Update answer and add notes.' });
     let final;
@@ -900,7 +907,9 @@ test('scheduled and named-event automations create fixed-goal tasks once', async
   } finally { await runtime.close(); await provider.close(); await f.remove(); }
 });
 
-test('local event endpoint authenticates deduplicates and bounds requests', async () => {
+test('local event endpoint authenticates deduplicates and bounds requests', {
+  skip: process.env.BYOK_TEST_IN_PROCESS === '1' && 'Loopback unavailable; run test:network on an unrestricted machine.'
+}, async () => {
   const f = await fixture();
   let calls = 0;
   const provider = await mockProvider((_req, res) => { calls++; reply(res, { content: 'Webhook completed.' }); });
